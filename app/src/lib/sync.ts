@@ -22,13 +22,18 @@ export async function enqueue(
   await idbPut('syncQueue', item);
 }
 
-/** Push queued items. Returns { pushed, failed }. Stops on first auth error. */
-export async function pushQueue(): Promise<{ pushed: number; failed: number }> {
+/** Push queued items. Returns { pushed, failed, errors }. Stops on first auth error. */
+export async function pushQueue(): Promise<{
+  pushed: number;
+  failed: number;
+  errors: string[];
+}> {
   const sb = getSupabase();
-  if (!sb || !isOnline()) return { pushed: 0, failed: 0 };
+  if (!sb || !isOnline()) return { pushed: 0, failed: 0, errors: [] };
   const items = await idbGetAll<SyncQueueItem>('syncQueue');
   let pushed = 0;
   let failed = 0;
+  const errors: string[] = [];
   for (const item of items) {
     try {
       await pushOne(sb, item);
@@ -36,12 +41,13 @@ export async function pushQueue(): Promise<{ pushed: number; failed: number }> {
       pushed++;
     } catch (e) {
       failed++;
-      const msg = String(e);
+      const msg = e instanceof Error ? e.message : String(e);
+      errors.push(`${item.kind} (${item.id.slice(0, 8)}): ${msg}`);
       if (/401|403|jwt/i.test(msg)) break; // auth problem — don't hammer
       await idbPut('syncQueue', { ...item, attempts: item.attempts + 1 });
     }
   }
-  return { pushed, failed };
+  return { pushed, failed, errors };
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
