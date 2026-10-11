@@ -1,0 +1,175 @@
+// Shared types for the Emergency Bridge Inspection app.
+// DB tables are emg_* prefixed (see supabase/migrations/001_emergency_app_schema.sql).
+
+export type YesNo = 'yes' | 'no';
+
+export type TriageList =
+  | 'destroyed'
+  | 'likely_destroyed'
+  | 'revisit'
+  | 'ground_followup'
+  | 'in_progress'
+  | 'complete';
+
+export type OpenStatus = 'yes' | 'no' | 'restricted_lanes';
+export type LoadStatus = 'yes' | 'no' | 'reduced_load';
+export type DebrisAmount = 'none' | 'half_truck' | 'one_truck' | 'multiple' | 'six_plus';
+export type ClosureType = 'fully_closed' | 'limited_traffic' | 'emergency_only';
+export type RoadStatus = 'open' | 'closed' | 'partial' | 'unknown';
+
+/** Bridge inventory record (emg_bridges). asset_id is TEXT (21 of 9,503 are alphanumeric). */
+export interface Bridge {
+  asset_id: string;
+  struct_no: string;
+  county: string | null;
+  county_name: string | null;
+  district: string | null; // '1'..'7'
+  facility: string | null;
+  feature: string | null;
+  location: string | null;
+  deck: string | null;
+  super: string | null;
+  sub: string | null;
+  channel: string | null;
+  culvert: string | null;
+  struct_eval: string | null;
+  deck_geom: string | null;
+  scour: string | null;
+  inv_rating: string | null;
+  op_rating: string | null;
+  posting: string | null;
+  design_load: string | null;
+  yr_built: number | null;
+  yr_recon: number | null;
+  length_m: number | null;
+  max_span_m: number | null;
+  spans: number | null;
+  lanes: number | null;
+  skew: number | null;
+  adt: number | null;
+  truck_pct: number | null;
+  insp_freq: number | null;
+  last_inspect: string | null;
+  maint: string | null;
+  owner: string | null;
+  status: string | null;
+  bridge_cond: string | null;
+  lowest: string | null;
+  span_mat: string | null;
+  span_type: string | null;
+  lon: number;
+  lat: number;
+}
+
+export interface District {
+  id: string;
+  dist_label: string;
+  geojson: GeoJSON.MultiPolygon;
+}
+
+/** Photo categories — never call downstation "reverse direction". */
+export type PhotoType =
+  | 'upstation'
+  | 'profile'
+  | 'downstation'
+  | 'destroyed_profile'
+  | 'destroyed_approach'
+  | 'rail'
+  | 'deck'
+  | 'super'
+  | 'sub'
+  | 'washout'
+  | 'condition'
+  | 'debris'
+  | 'roadblock';
+
+export interface PhotoRef {
+  id: string; // client-side uuid
+  photo_type: PhotoType;
+  description?: string; // required for condition/debris
+  dataUrl?: string; // local preview (not persisted to server)
+  storage_path?: string; // set after upload
+  taken_at: string; // ISO
+}
+
+/** Local inspection draft — mirrors emg_inspections columns. */
+export interface InspectionDraft {
+  client_inspection_id: string;
+  asset_id: string;
+  inspector_name: string;
+  inspection_datetime: string;
+  device_id?: string;
+  destroyed: YesNo | null;
+  access: YesNo | null;
+  drone_used: YesNo | null;
+  bridge_still_there: YesNo | null;
+  triage_list: TriageList;
+  overtopped: YesNo | null;
+  overtop_depth_ft: number | null;
+  damage_rail: YesNo;
+  damage_deck: YesNo;
+  damage_super: YesNo;
+  damage_sub: YesNo;
+  washout_abutment: YesNo;
+  remain_open: OpenStatus | null;
+  remain_open_notes: string;
+  safe_load: LoadStatus | null;
+  safe_load_notes: string;
+  debris_amount: DebrisAmount | null;
+  gps_lat: number | null;
+  gps_lon: number | null;
+  coord_mismatch: YesNo | null;
+  photos: PhotoRef[];
+  sync_status: 'pending' | 'synced' | 'conflict';
+  updated_at: string;
+}
+
+export interface Roadblock {
+  id: string;
+  road_name: string;
+  closure_type: ClosureType;
+  lon: number;
+  lat: number;
+  reporter: string;
+  reported_at: string;
+  status: 'active' | 'reopened';
+  reopened_at?: string | null;
+  reopened_by?: string | null;
+  notes: string | null;
+}
+
+export interface RoadStatusPin {
+  id: string;
+  lon: number;
+  lat: number;
+  status: RoadStatus;
+  reporter: string;
+  reported_at: string;
+  notes: string | null;
+}
+
+export interface PathTrack {
+  id: string;
+  inspector: string;
+  geojson: GeoJSON.LineString;
+  started_at: string;
+  ended_at: string | null;
+}
+
+export interface TeamPosition {
+  inspector: string;
+  lon: number;
+  lat: number;
+  updated_at: string;
+  assignment: string | null;
+  completed_count: number;
+  pending_count: number;
+}
+
+export interface SyncQueueItem {
+  id: string;
+  kind: 'inspection' | 'roadblock' | 'road_status' | 'track' | 'position' | 'photo';
+  payload: unknown;
+  attempts: number;
+  created_at: string;
+}
