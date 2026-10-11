@@ -301,9 +301,11 @@ const FieldApp: React.FC = () => {
         // Team sync failure must not mask the main sync result.
       }
       setSyncResult(
-        result
-          ? `Sync complete: ${JSON.stringify(result)}`
-          : 'Sync complete.'
+        result.failed > 0
+          ? `Sync: ${result.pushed} pushed, ${result.failed} failed.\n${result.errors.join('\n')}`
+          : result.pushed > 0
+            ? `Sync complete: ${result.pushed} pushed.`
+            : 'Sync complete. Nothing to push.'
       );
     } catch (err) {
       const msg =
