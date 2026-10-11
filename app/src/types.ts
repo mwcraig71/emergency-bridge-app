@@ -138,6 +138,17 @@ export interface Roadblock {
   notes: string | null;
 }
 
+/** Crash-resilience marker: tracks the inspection in progress so the app
+ *  can offer to resume after a crash/power loss. Stored in the IndexedDB
+ *  `settings` store under key 'active_session'. */
+export interface ActiveSession {
+  key: 'active_session';
+  asset_id: string;
+  bridge_info: Bridge;
+  started_at: string; // ISO timestamp
+  last_active: string; // ISO timestamp, updated every 30s during inspection
+}
+
 export interface RoadStatusPin {
   id: string;
   lon: number;
@@ -172,4 +183,32 @@ export interface SyncQueueItem {
   payload: unknown;
   attempts: number;
   created_at: string;
+}
+
+export type AssignmentStatus = 'assigned' | 'in_progress' | 'complete';
+
+/** Loose bridge-to-inspector assignment (emg_assignments). */
+export interface Assignment {
+  id: string;
+  asset_id: string;
+  assigned_to: string;
+  assigned_by: string | null;
+  assigned_at: string;
+  status: AssignmentStatus;
+  completed_by: string | null;
+  completed_at: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+/** Inspector notification (emg_notifications). */
+export interface AppNotification {
+  id: string;
+  recipient: string;
+  type: string;
+  title: string;
+  message: string;
+  related_asset_id: string | null;
+  created_at: string;
+  read_at: string | null;
 }
