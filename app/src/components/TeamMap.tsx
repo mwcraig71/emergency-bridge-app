@@ -5,11 +5,31 @@ import type { Bridge, Roadblock, RoadStatusPin, PathTrack, TeamPosition } from '
 import { createTilePackProvider } from '../lib/tilepacks';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import { idbGetAll } from '../lib/idb';
+import {
+  OFFLINE_PROTOCOL,
+  getTileBounds,
+  estimateDownload,
+  downloadTiles,
+  getOfflineTile,
+  parseOfflineTileUrl,
+  realUrlFromOffline,
+  rewriteStyleForOffline,
+  saveOfflineArea,
+  listOfflineAreas,
+  deleteOfflineArea,
+  offlineTileUsage,
+  formatBytes,
+  type TileBounds,
+  type DownloadProgress,
+  type OfflineArea,
+} from '../lib/offlineTiles';
 
 interface TeamMapProps {
   focusBridge?: Bridge | null;
   showTeam?: boolean;
   showLocate?: boolean;
+  /** Show the "download offline map" button (field app). */
+  showOfflineDownload?: boolean;
   position?: { lon: number; lat: number } | null;
   height?: string;
   onBridgeClick?: (assetId: string) => void;
@@ -21,6 +41,32 @@ interface TeamMapProps {
 type Recency = '6h' | '24h' | 'all';
 
 const SC_CENTER: [number, number] = [-80.9, 33.9];
+
+/**
+ * Register the offline-tile:// protocol once per page load.
+ * Checks IndexedDB for a cached tile; falls back to the network URL.
+ */
+let offlineProtocolRegistered = false;
+function ensureOfflineProtocol(): void {
+  if (offlineProtocolRegistered) return;
+  offlineProtocolRegistered = true;
+  try {
+    maplibregl.addProtocol(OFFLINE_PROTOCOL, async (params) => {
+      const coord = parseOfflineTileUrl(params.url);
+      if (coord) {
+        const cached = await getOfflineTile(coord.z, coord.x, coord.y);
+        if (cached) return { data: cached };
+      }
+      // Cache miss (or unparseable URL) — fetch from the network.
+      const realUrl = realUrlFromOffline(params.url);
+      const resp = await fetch(realUrl);
+      if (!resp.ok) throw new Error(`Tile fetch failed: ${resp.status}`);
+      return { data: await resp.arrayBuffer() };
+    });
+  } catch {
+    // Protocol already registered (HMR / double-mount) — safe to ignore.
+  }
+}
 
 function statusColor(status: string | undefined | null): string {
   switch (status) {
@@ -147,6 +193,7 @@ export default function TeamMap({
   focusBridge,
   showTeam = false,
   showLocate = false,
+  showOfflineDownload = false,
   position = null,
   height = '60dvh',
   onBridgeClick,
@@ -163,6 +210,19 @@ export default function TeamMap({
   const [styleError, setStyleError] = useState<boolean>(false);
   const [ready, setReady] = useState<boolean>(false);
   const [selected, setSelected] = useState<Bridge | null>(null);
+  // Offline tile download state
+  const [dlOpen, setDlOpen] = useState(false);
+  const [dlBounds, setDlBounds] = useState<TileBounds | null>(null);
+  const [dlMinZoom, setDlMinZoom] = useState(8);
+  const [dlMaxZoom, setDlMaxZoom] = useState(14);
+  const [dlName, setDlName] = useState('');
+  const [dlProgress, setDlProgress] = useState<DownloadProgress | null>(null);
+  const [dlError, setDlError] = useState<string | null>(null);
+  const [dlDone, setDlDone] = useState(false);
+  const [offlineAreas, setOfflineAreas] = useState<OfflineArea[]>([]);
+  const [tileUsage, setTileUsage] = useState<{ tiles: number; bytes: number }>({ tiles: 0, bytes: 0 });
+  const [manageOpen, setManageOpen] = useState(false);
+  const dlCancelRef = useRef(false);
   const dataRef = useRef<{
     bridges: Bridge[];
     roadblocks: Roadblock[];
@@ -196,6 +256,87 @@ export default function TeamMap({
     focusBridgeRef.current = focusBridge ?? null;
   }, [focusBridge]);
 
+  // ---- Offline tile download ----
+
+  const openDownloadDialog = () => {
+    const map = mapRef.current;
+    if (!map) return;
+    const bounds = getTileBounds(map);
+    setDlBounds(bounds);
+    setDlError(null);
+    setDlDone(false);
+    setDlProgress(null);
+    setDlName(`Area ${new Date().toLocaleDateString()}`);
+    setDlOpen(true);
+  };
+
+  const startDownload = async () => {
+    if (!dlBounds) return;
+    setDlError(null);
+    setDlDone(false);
+    dlCancelRef.current = false;
+    setDlProgress({ done: 0, total: 0, bytes: 0, failed: 0 });
+    try {
+      const result = await downloadTiles(
+        dlBounds,
+        dlMinZoom,
+        dlMaxZoom,
+        (p) => setDlProgress({ ...p }),
+        () => dlCancelRef.current,
+      );
+      if (dlCancelRef.current) {
+        setDlError('Download cancelled.');
+        return;
+      }
+      // Save as a named offline area.
+      const area: OfflineArea = {
+        id:
+          typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function'
+            ? crypto.randomUUID()
+            : `area-${Date.now()}`,
+        name: dlName.trim() || `Area ${new Date().toLocaleDateString()}`,
+        bounds: dlBounds,
+        minZoom: dlMinZoom,
+        maxZoom: dlMaxZoom,
+        tileCount: result.total,
+        downloadedTiles: result.done - result.failed,
+        sizeBytes: result.bytes,
+        downloadedAt: new Date().toISOString(),
+      };
+      await saveOfflineArea(area);
+      const [areas, usage] = await Promise.all([listOfflineAreas(), offlineTileUsage()]);
+      setOfflineAreas(areas);
+      setTileUsage(usage);
+      setDlDone(true);
+      if (result.failed > 0) {
+        setDlError(`${result.failed} tiles failed to download (skipped).`);
+      }
+    } catch (err) {
+      setDlError(err instanceof Error ? err.message : 'Download failed.');
+    }
+  };
+
+  const cancelDownload = () => {
+    dlCancelRef.current = true;
+  };
+
+  const refreshOfflineAreas = async () => {
+    const [areas, usage] = await Promise.all([listOfflineAreas(), offlineTileUsage()]);
+    setOfflineAreas(areas);
+    setTileUsage(usage);
+  };
+
+  const handleDeleteArea = async (id: string) => {
+    if (!window.confirm('Delete this offline area and its tiles?')) return;
+    await deleteOfflineArea(id);
+    await refreshOfflineAreas();
+  };
+
+  // Load offline area list when the manage dialog opens.
+  useEffect(() => {
+    if (manageOpen) void refreshOfflineAreas();
+  }, [manageOpen]);
+
   // Init map once
   useEffect(() => {
     if (!wrapRef.current) return;
@@ -206,11 +347,32 @@ export default function TeamMap({
     const wrap = wrapRef.current;
 
     (async () => {
+      // Register offline tile protocol before the map loads its style.
+      ensureOfflineProtocol();
+
       let style: string | maplibregl.StyleSpecification;
       try {
         const provider = createTilePackProvider();
         const s = await provider.getStyle();
-        style = s as string | maplibregl.StyleSpecification;
+        if (typeof s === 'string') {
+          // Fetch the style JSON and rewrite tile URLs to go through the
+          // offline-tile:// protocol (IndexedDB cache with network fallback).
+          try {
+            const resp = await fetch(s);
+            if (resp.ok) {
+              const styleJson = (await resp.json()) as Record<string, unknown>;
+              style = rewriteStyleForOffline(styleJson) as maplibregl.StyleSpecification;
+            } else {
+              style = s;
+            }
+          } catch {
+            style = s;
+          }
+        } else {
+          style = rewriteStyleForOffline(
+            s as Record<string, unknown>,
+          ) as maplibregl.StyleSpecification;
+        }
       } catch {
         style = {
           version: 8,
@@ -1058,6 +1220,53 @@ export default function TeamMap({
         </select>
       </div>
 
+      {/* Offline map download button (field app) */}
+      {showOfflineDownload && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 48,
+            right: 8,
+            zIndex: 5,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 6,
+          }}
+        >
+          <button
+            type="button"
+            onClick={openDownloadDialog}
+            style={{
+              background: 'rgba(15,23,42,0.85)',
+              color: '#e2e8f0',
+              border: '1px solid #334155',
+              borderRadius: 6,
+              padding: '8px 12px',
+              fontSize: 13,
+              fontWeight: 600,
+              cursor: 'pointer',
+            }}
+          >
+            ⬇ Offline map
+          </button>
+          <button
+            type="button"
+            onClick={() => setManageOpen(true)}
+            style={{
+              background: 'rgba(15,23,42,0.85)',
+              color: '#94a3b8',
+              border: '1px solid #334155',
+              borderRadius: 6,
+              padding: '6px 12px',
+              fontSize: 12,
+              cursor: 'pointer',
+            }}
+          >
+            Manage
+          </button>
+        </div>
+      )}
+
       {/* Legend */}
       <div
         style={{
@@ -1326,6 +1535,347 @@ export default function TeamMap({
                 </button>
               </div>
             </div>
+          </div>
+        </>
+      )}
+
+      {/* Offline download dialog */}
+      {dlOpen && dlBounds && (
+        <>
+          <div
+            onClick={() => !dlProgress && setDlOpen(false)}
+            aria-hidden
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 19,
+              background: 'rgba(0,0,0,0.5)',
+            }}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Download offline map"
+            style={{
+              position: 'absolute',
+              left: 12,
+              right: 12,
+              top: '10%',
+              zIndex: 20,
+              background: '#0f172a',
+              color: '#e2e8f0',
+              borderRadius: 12,
+              padding: 16,
+              maxWidth: 480,
+              margin: '0 auto',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+              maxHeight: '80%',
+              overflowY: 'auto',
+            }}
+          >
+            <h3 style={{ margin: '0 0 12px', fontSize: 17 }}>
+              Download offline map
+            </h3>
+            <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 12px' }}>
+              Saves the currently visible map area for offline use.
+            </p>
+
+            <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+              Area name
+            </label>
+            <input
+              type="text"
+              value={dlName}
+              onChange={(e) => setDlName(e.target.value)}
+              disabled={!!dlProgress && !dlDone}
+              style={{
+                width: '100%',
+                padding: '8px 10px',
+                borderRadius: 8,
+                border: '1px solid #334155',
+                background: '#1e293b',
+                color: '#e2e8f0',
+                fontSize: 14,
+                marginBottom: 12,
+                boxSizing: 'border-box',
+              }}
+            />
+
+            <div style={{ display: 'flex', gap: 12, marginBottom: 12 }}>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                  Min zoom
+                </label>
+                <select
+                  value={dlMinZoom}
+                  onChange={(e) => setDlMinZoom(parseInt(e.target.value, 10))}
+                  disabled={!!dlProgress && !dlDone}
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    borderRadius: 8,
+                    border: '1px solid #334155',
+                    background: '#1e293b',
+                    color: '#e2e8f0',
+                    fontSize: 14,
+                  }}
+                >
+                  {[6, 7, 8, 9, 10].map((z) => (
+                    <option key={z} value={z}>z{z}</option>
+                  ))}
+                </select>
+              </div>
+              <div style={{ flex: 1 }}>
+                <label style={{ display: 'block', fontSize: 13, fontWeight: 600, marginBottom: 4 }}>
+                  Max zoom
+                </label>
+                <select
+                  value={dlMaxZoom}
+                  onChange={(e) => setDlMaxZoom(parseInt(e.target.value, 10))}
+                  disabled={!!dlProgress && !dlDone}
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    borderRadius: 8,
+                    border: '1px solid #334155',
+                    background: '#1e293b',
+                    color: '#e2e8f0',
+                    fontSize: 14,
+                  }}
+                >
+                  {[12, 13, 14, 15, 16].map((z) => (
+                    <option key={z} value={z}>z{z}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {(() => {
+              const est = estimateDownload(dlBounds, dlMinZoom, dlMaxZoom);
+              return (
+                <div
+                  style={{
+                    fontSize: 13,
+                    color: est.exceedsCap ? '#fca5a5' : '#94a3b8',
+                    marginBottom: 12,
+                    padding: '8px 10px',
+                    borderRadius: 8,
+                    background: est.exceedsCap ? 'rgba(153,27,27,0.3)' : '#1e293b',
+                  }}
+                >
+                  <div>~{est.tileCount.toLocaleString()} tiles</div>
+                  <div>~{formatBytes(est.estimatedBytes)} estimated</div>
+                  {est.exceedsCap && (
+                    <div style={{ fontWeight: 700, marginTop: 4 }}>
+                      Exceeds the {formatBytes(est.maxBytes)} cap — zoom in or reduce the zoom range.
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
+
+            {dlProgress && !dlDone && (
+              <div style={{ marginBottom: 12 }}>
+                <div
+                  style={{
+                    height: 10,
+                    borderRadius: 5,
+                    background: '#1e293b',
+                    overflow: 'hidden',
+                    marginBottom: 6,
+                  }}
+                >
+                  <div
+                    style={{
+                      height: '100%',
+                      width: `${dlProgress.total > 0 ? Math.round((dlProgress.done / dlProgress.total) * 100) : 0}%`,
+                      background: '#16a34a',
+                      transition: 'width 0.2s',
+                    }}
+                  />
+                </div>
+                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                  {dlProgress.done.toLocaleString()} / {dlProgress.total.toLocaleString()} tiles
+                  {' · '}{formatBytes(dlProgress.bytes)}
+                  {dlProgress.failed > 0 && ` · ${dlProgress.failed} failed`}
+                </div>
+              </div>
+            )}
+
+            {dlError && (
+              <div style={{ fontSize: 13, color: '#fca5a5', marginBottom: 12 }}>
+                {dlError}
+              </div>
+            )}
+
+            {dlDone && (
+              <div style={{ fontSize: 13, color: '#86efac', marginBottom: 12, fontWeight: 600 }}>
+                ✓ Download complete. This area is available offline.
+              </div>
+            )}
+
+            <div style={{ display: 'flex', gap: 8 }}>
+              {!dlProgress || dlDone ? (
+                <>
+                  {!dlDone && (
+                    <button
+                      type="button"
+                      onClick={startDownload}
+                      disabled={estimateDownload(dlBounds, dlMinZoom, dlMaxZoom).exceedsCap}
+                      style={{
+                        flex: 1,
+                        minHeight: 48,
+                        borderRadius: 10,
+                        border: 'none',
+                        background: '#16a34a',
+                        color: '#fff',
+                        fontSize: 15,
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        opacity: estimateDownload(dlBounds, dlMinZoom, dlMaxZoom).exceedsCap ? 0.5 : 1,
+                      }}
+                    >
+                      Download
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => { setDlOpen(false); setDlProgress(null); }}
+                    style={{
+                      flex: 1,
+                      minHeight: 48,
+                      borderRadius: 10,
+                      border: '1px solid #334155',
+                      background: 'transparent',
+                      color: '#94a3b8',
+                      fontSize: 15,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {dlDone ? 'Close' : 'Cancel'}
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={cancelDownload}
+                  style={{
+                    flex: 1,
+                    minHeight: 48,
+                    borderRadius: 10,
+                    border: '1px solid #7f1d1d',
+                    background: 'rgba(153,27,27,0.3)',
+                    color: '#fca5a5',
+                    fontSize: 15,
+                    fontWeight: 600,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel download
+                </button>
+              )}
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Manage offline areas dialog */}
+      {manageOpen && (
+        <>
+          <div
+            onClick={() => setManageOpen(false)}
+            aria-hidden
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 19,
+              background: 'rgba(0,0,0,0.5)',
+            }}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label="Manage offline maps"
+            style={{
+              position: 'absolute',
+              left: 12,
+              right: 12,
+              top: '10%',
+              zIndex: 20,
+              background: '#0f172a',
+              color: '#e2e8f0',
+              borderRadius: 12,
+              padding: 16,
+              maxWidth: 480,
+              margin: '0 auto',
+              boxShadow: '0 8px 32px rgba(0,0,0,0.6)',
+              maxHeight: '80%',
+              overflowY: 'auto',
+            }}
+          >
+            <h3 style={{ margin: '0 0 4px', fontSize: 17 }}>Offline maps</h3>
+            <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 12px' }}>
+              {tileUsage.tiles.toLocaleString()} tiles · {formatBytes(tileUsage.bytes)} used
+            </p>
+            {offlineAreas.length === 0 ? (
+              <p style={{ fontSize: 14, color: '#94a3b8' }}>
+                No offline areas downloaded yet. Pan the map to your work area
+                and tap "⬇ Offline map".
+              </p>
+            ) : (
+              offlineAreas.map((a) => (
+                <div
+                  key={a.id}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 8,
+                    padding: '10px 0',
+                    borderBottom: '1px solid #1e293b',
+                  }}
+                >
+                  <div style={{ flex: 1 }}>
+                    <div style={{ fontWeight: 600, fontSize: 14 }}>{a.name}</div>
+                    <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                      z{a.minZoom}–z{a.maxZoom} · {a.downloadedTiles.toLocaleString()} tiles ·{' '}
+                      {formatBytes(a.sizeBytes)}
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteArea(a.id)}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: 8,
+                      border: '1px solid #7f1d1d',
+                      background: 'transparent',
+                      color: '#fca5a5',
+                      fontSize: 13,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Delete
+                  </button>
+                </div>
+              ))
+            )}
+            <button
+              type="button"
+              onClick={() => setManageOpen(false)}
+              style={{
+                width: '100%',
+                minHeight: 44,
+                marginTop: 12,
+                borderRadius: 10,
+                border: '1px solid #334155',
+                background: 'transparent',
+                color: '#94a3b8',
+                fontSize: 15,
+                cursor: 'pointer',
+              }}
+            >
+              Close
+            </button>
           </div>
         </>
       )}
