@@ -99,6 +99,17 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
         .from('emg_inspections')
         .upsert(row, { onConflict: 'client_inspection_id' });
       if (error) throw new Error(error.message);
+      // Mark the local draft as synced so pendingCount doesn't count it.
+      try {
+        const draft = await idbGetAll<InspectionDraft>('drafts').then(
+          (ds) => ds.find((x) => x.client_inspection_id === d.client_inspection_id)
+        );
+        if (draft) {
+          await idbPut('drafts', { ...draft, sync_status: 'synced' });
+        }
+      } catch {
+        // Non-fatal: draft stays 'pending' but won't block future syncs.
+      }
       // Team assignment bookkeeping — best effort, never fails the push.
       await markAssignmentComplete(sb, d.asset_id, d.inspector_name).catch(
         () => {},
