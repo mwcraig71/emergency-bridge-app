@@ -12,6 +12,9 @@ interface TeamMapProps {
   position?: { lon: number; lat: number } | null;
   height?: string;
   onBridgeClick?: (assetId: string) => void;
+  /** Field-app actions for the built-in bridge info sheet. Shown only when set. */
+  onStartInspection?: (bridge: Bridge) => void;
+  onGetDirections?: (bridge: Bridge) => void;
 }
 
 type Recency = '6h' | '24h' | 'all';
@@ -123,12 +126,30 @@ function escapeText(v: unknown): string {
   return String(v);
 }
 
+/** Short display ID for map labels, e.g. "SC-1892" -> "1892". */
+function shortAssetId(assetId: string): string {
+  const dash = assetId.indexOf('-');
+  return dash >= 0 ? assetId.slice(dash + 1) : assetId;
+}
+
+/** NBI 0-9 condition rating -> color. */
+function ratingColor(r: string | null | undefined): string {
+  if (r == null || r === '' || r === 'N') return '#6b7280';
+  const n = parseInt(r, 10);
+  if (Number.isNaN(n)) return '#6b7280';
+  if (n >= 7) return '#16a34a';
+  if (n >= 5) return '#eab308';
+  return '#dc2626';
+}
+
 export default function TeamMap({
   focusBridge,
   showTeam = false,
   position = null,
   height = '60dvh',
   onBridgeClick,
+  onStartInspection,
+  onGetDirections,
 }: TeamMapProps) {
   const wrapRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<maplibregl.Map | null>(null);
@@ -139,6 +160,7 @@ export default function TeamMap({
   const [recency, setRecency] = useState<Recency>('all');
   const [styleError, setStyleError] = useState<boolean>(false);
   const [ready, setReady] = useState<boolean>(false);
+  const [selected, setSelected] = useState<Bridge | null>(null);
   const dataRef = useRef<{
     bridges: Bridge[];
     roadblocks: Roadblock[];
@@ -159,6 +181,13 @@ export default function TeamMap({
   useEffect(() => {
     onBridgeClickRef.current = onBridgeClick;
   }, [onBridgeClick]);
+
+  // Ref so the one-time map click handler can open the info sheet with
+  // the latest state setter and full bridge lookup.
+  const selectBridgeRef = useRef<(b: Bridge) => void>(() => {});
+  useEffect(() => {
+    selectBridgeRef.current = (b: Bridge) => setSelected(b);
+  });
 
   const focusBridgeRef = useRef(focusBridge);
   useEffect(() => {
@@ -259,15 +288,45 @@ export default function TeamMap({
           const f = ev.features && ev.features[0];
           if (!f) return;
           const props = (f.properties || {}) as { asset_id?: string };
-          if (props.asset_id && onBridgeClickRef.current) {
+          if (!props.asset_id) return;
+          if (onBridgeClickRef.current) {
             onBridgeClickRef.current(props.asset_id);
+            return;
           }
+          // No external handler (field app): open the built-in info sheet.
+          const b = dataRef.current.bridges.find(
+            (x) => x.asset_id === props.asset_id,
+          );
+          if (b) selectBridgeRef.current(b);
         });
         map.on('mouseenter', 'bridges-circle', () => {
           map.getCanvas().style.cursor = 'pointer';
         });
         map.on('mouseleave', 'bridges-circle', () => {
           map.getCanvas().style.cursor = '';
+        });
+
+        // Bridge number labels — symbol layer, only at high zoom to avoid clutter.
+        map.addLayer({
+          id: 'bridges-label',
+          type: 'symbol',
+          source: 'bridges',
+          minzoom: 11,
+          layout: {
+            'text-field': ['get', 'label'],
+            'text-size': 11,
+            'text-font': ['Open Sans Regular', 'Noto Sans Regular'],
+            'text-anchor': 'bottom',
+            'text-offset': [0, -0.9],
+            'text-allow-overlap': false,
+            'text-ignore-placement': false,
+            'text-padding': 2,
+          },
+          paint: {
+            'text-color': '#e2e8f0',
+            'text-halo-color': '#0b1220',
+            'text-halo-width': 1.5,
+          },
         });
 
         // Roadblocks source + layer
@@ -652,6 +711,7 @@ export default function TeamMap({
             },
             properties: {
               asset_id: b.asset_id,
+              label: shortAssetId(b.asset_id),
               color,
             },
           };
@@ -1045,6 +1105,215 @@ export default function TeamMap({
         >
           Map tiles unavailable offline — GPS and data layers still work.
         </div>
+      )}
+
+      {/* Bridge info bottom sheet (field app tap-to-inspect) */}
+      {selected && (
+        <>
+          <div
+            onClick={() => setSelected(null)}
+            aria-hidden
+            style={{
+              position: 'absolute',
+              inset: 0,
+              zIndex: 9,
+              background: 'rgba(0,0,0,0.25)',
+            }}
+          />
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Bridge ${selected.asset_id}`}
+            style={{
+              position: 'absolute',
+              left: 0,
+              right: 0,
+              bottom: 0,
+              zIndex: 10,
+              display: 'flex',
+              justifyContent: 'center',
+              pointerEvents: 'none',
+            }}
+          >
+            <div
+              style={{
+                pointerEvents: 'auto',
+                width: '100%',
+                maxWidth: 560,
+                maxHeight: '55%',
+                overflowY: 'auto',
+                background: '#0f172a',
+                color: '#e2e8f0',
+                borderTopLeftRadius: 16,
+                borderTopRightRadius: 16,
+                padding: '8px 16px calc(12px + env(safe-area-inset-bottom))',
+                boxShadow: '0 -4px 24px rgba(0,0,0,0.5)',
+              }}
+            >
+              <div
+                aria-hidden
+                style={{
+                  width: 40,
+                  height: 4,
+                  borderRadius: 2,
+                  background: '#334155',
+                  margin: '4px auto 10px',
+                }}
+              />
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: 12,
+                }}
+              >
+                <div>
+                  <div style={{ fontSize: 18, fontWeight: 700 }}>
+                    {selected.asset_id}
+                  </div>
+                  <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
+                    {[selected.facility, selected.feature]
+                      .filter(Boolean)
+                      .join(' over ') || '—'}
+                  </div>
+                  <div style={{ fontSize: 13, color: '#94a3b8' }}>
+                    {selected.county_name ?? selected.county ?? '—'}
+                    {selected.yr_built ? ` · Built ${selected.yr_built}` : ''}
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setSelected(null)}
+                  aria-label="Close bridge details"
+                  style={{
+                    flex: '0 0 auto',
+                    background: 'transparent',
+                    border: '1px solid #334155',
+                    color: '#e2e8f0',
+                    borderRadius: 8,
+                    width: 36,
+                    height: 36,
+                    fontSize: 18,
+                    cursor: 'pointer',
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 12,
+                  marginTop: 10,
+                  fontSize: 13,
+                }}
+              >
+                {(
+                  [
+                    ['Deck', selected.deck],
+                    ['Super', selected.super],
+                    ['Sub', selected.sub],
+                  ] as Array<[string, string | null]>
+                ).map(([label, val]) => (
+                  <div
+                    key={label}
+                    style={{
+                      flex: 1,
+                      background: '#1e293b',
+                      borderRadius: 8,
+                      padding: '8px 10px',
+                      textAlign: 'center',
+                    }}
+                  >
+                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{label}</div>
+                    <div
+                      style={{
+                        fontSize: 18,
+                        fontWeight: 700,
+                        color: ratingColor(val),
+                      }}
+                    >
+                      {val ?? '—'}
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div
+                style={{
+                  display: 'flex',
+                  gap: 8,
+                  marginTop: 12,
+                }}
+              >
+                {onStartInspection && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const b = selected;
+                      setSelected(null);
+                      onStartInspection(b);
+                    }}
+                    style={{
+                      flex: 1,
+                      minHeight: 48,
+                      borderRadius: 10,
+                      border: 'none',
+                      background: '#16a34a',
+                      color: '#fff',
+                      fontSize: 15,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Start Inspection
+                  </button>
+                )}
+                {onGetDirections && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const b = selected;
+                      setSelected(null);
+                      onGetDirections(b);
+                    }}
+                    style={{
+                      flex: 1,
+                      minHeight: 48,
+                      borderRadius: 10,
+                      border: '1px solid #334155',
+                      background: '#1e293b',
+                      color: '#e2e8f0',
+                      fontSize: 15,
+                      fontWeight: 600,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Get Directions
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={() => setSelected(null)}
+                  style={{
+                    minHeight: 48,
+                    padding: '0 18px',
+                    borderRadius: 10,
+                    border: '1px solid #334155',
+                    background: 'transparent',
+                    color: '#94a3b8',
+                    fontSize: 15,
+                    cursor: 'pointer',
+                  }}
+                >
+                  Close
+                </button>
+              </div>
+            </div>
+          </div>
+        </>
       )}
 
       <style>{`
