@@ -9,6 +9,7 @@ import { idbGetAll } from '../lib/idb';
 interface TeamMapProps {
   focusBridge?: Bridge | null;
   showTeam?: boolean;
+  showLocate?: boolean;
   position?: { lon: number; lat: number } | null;
   height?: string;
   onBridgeClick?: (assetId: string) => void;
@@ -145,6 +146,7 @@ function ratingColor(r: string | null | undefined): string {
 export default function TeamMap({
   focusBridge,
   showTeam = false,
+  showLocate = false,
   position = null,
   height = '60dvh',
   onBridgeClick,
@@ -247,6 +249,18 @@ export default function TeamMap({
       }
 
       mapRef.current = map;
+
+      // Locate-me button (field app)
+      if (showLocate) {
+        map.addControl(
+          new maplibregl.GeolocateControl({
+            positionOptions: { enableHighAccuracy: true },
+            trackUserLocation: false,
+            showUserLocation: true,
+          }),
+          'bottom-right'
+        );
+      }
 
       map.on('error', (e) => {
         const err = (e as unknown as { error?: Error }).error;
