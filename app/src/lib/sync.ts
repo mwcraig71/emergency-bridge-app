@@ -55,12 +55,23 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
   switch (item.kind) {
     case 'inspection': {
       const d = item.payload as InspectionDraft;
+      // Validate required fields before push — give user-friendly errors.
+      const missing: string[] = [];
+      if (!d.destroyed) missing.push('"Was the bridge destroyed?"');
+      if (!d.asset_id) missing.push('bridge ID');
+      if (!d.inspector_name) missing.push('inspector name');
+      if (missing.length > 0) {
+        throw new Error(
+          `Inspection is missing: ${missing.join(', ')}. ` +
+          `Please open the inspection and complete these fields.`
+        );
+      }
       const row = {
         asset_id: d.asset_id,
         inspector_name: d.inspector_name,
         inspection_datetime: d.inspection_datetime,
         device_id: d.device_id ?? null,
-        destroyed: d.destroyed ?? 'no',
+        destroyed: d.destroyed,
         access: d.access,
         drone_used: d.drone_used,
         bridge_still_there: d.bridge_still_there,
