@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import type { Assignment } from '../types';
+import BulkBridgeInput from './BulkBridgeInput';
 
 interface DistrictRow {
   id: string;
@@ -33,6 +34,7 @@ export default function AssignmentsPanel() {
   const [singleAssetId, setSingleAssetId] = useState('');
   const [singleInspector, setSingleInspector] = useState('');
   const [filterInspector, setFilterInspector] = useState('');
+  const [tab, setTab] = useState<'district' | 'bulk'>('district');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -245,10 +247,28 @@ export default function AssignmentsPanel() {
             {message}
           </p>
         )}
+        <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
+          <button
+            type="button"
+            className={tab === 'district' ? 'btn btn-primary' : 'btn'}
+            onClick={() => setTab('district')}
+          >
+            District / County
+          </button>
+          <button
+            type="button"
+            className={tab === 'bulk' ? 'btn btn-primary' : 'btn'}
+            onClick={() => setTab('bulk')}
+          >
+            Bulk Input
+          </button>
+        </div>
       </div>
 
-      <div className="card">
-        <h2 style={{ marginTop: 0 }}>Bulk assign by district / county</h2>
+      {tab === 'district' && (
+        <>
+          <div className="card">
+            <h2 style={{ marginTop: 0 }}>Bulk assign by district / county</h2>
         <div
           style={{
             display: 'flex',
@@ -352,6 +372,10 @@ export default function AssignmentsPanel() {
           </button>
         </div>
       </div>
+        </>
+      )}
+
+      {tab === 'bulk' && <BulkBridgeInput />}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Assignment status</h2>
