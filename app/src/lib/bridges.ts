@@ -1,5 +1,7 @@
 // Bridge inventory data access: Supabase (online) with IndexedDB cache.
-// PostGIS points are read via st_x/st_y so no WKB parsing is needed client-side.
+// lon/lat/geojson are generated columns on the emg_* tables (migration 006),
+// so plain column selects work — PostgREST rejects function calls like
+// st_x(geom) inside the select parameter (HTTP 400).
 import { getSupabase, isSupabaseConfigured, isOnline } from './supabase';
 import { idbBulkPut, idbGet, idbGetAll, idbPut } from './idb';
 import { normalizeAssetId, haversineMeters } from './geo';
@@ -57,7 +59,7 @@ const BRIDGE_SELECT =
   'deck,super,sub,channel,culvert,struct_eval,deck_geom,scour,inv_rating,op_rating,' +
   'posting,design_load,yr_built,yr_recon,length_m,max_span_m,spans,lanes,skew,adt,' +
   'truck_pct,insp_freq,last_inspect,maint,owner,status,bridge_cond,lowest,span_mat,' +
-  'span_type,lon:st_x(geom),lat:st_y(geom)';
+  'span_type,lon,lat';
 
 /** Download the full inventory into the IndexedDB cache. Shows progress. */
 export async function syncBridgeCache(
@@ -65,6 +67,15 @@ export async function syncBridgeCache(
 ): Promise<number> {
   const sb = getSupabase();
   if (!sb) throw new Error('Supabase is not configured');
+  let expected = 0;
+  try {
+    const { count } = await sb
+      .from('emg_bridges')
+      .select('asset_id', { count: 'exact', head: true });
+    if (typeof count === 'number') expected = count;
+  } catch {
+    // Progress total is cosmetic; the page loop below still downloads everything.
+  }
   let offset = 0;
   let total = 0;
   for (;;) {
@@ -78,7 +89,7 @@ export async function syncBridgeCache(
     if (rows.length === 0) break;
     await idbBulkPut('bridges', rows);
     total += rows.length;
-    onProgress?.(total, 9503);
+    onProgress?.(total, expected || total);
     if (rows.length < PAGE) break;
     offset += PAGE;
   }
@@ -134,7 +145,7 @@ export async function getDistricts(): Promise<District[]> {
   const sb = getSupabase()!;
   const { data, error } = await sb
     .from('emg_districts')
-    .select('id,dist_label,geojson:st_asgeojson(geom)');
+    .select('id,dist_label,geojson');
   if (error || !data) return [];
   const dists: District[] = (data as Array<Record<string, unknown>>).map((r) => ({
     id: String(r.id),
