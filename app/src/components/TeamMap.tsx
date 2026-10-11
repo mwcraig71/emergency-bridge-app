@@ -570,7 +570,7 @@ export default function TeamMap({
         const { data } = await supabase
           .from('emg_roadblocks')
           .select(
-            'id,road_name,closure_type,status,reporter,reported_at,reopened_at,reopened_by,notes,lon:st_x(geom),lat:st_y(geom)',
+            'id,road_name,closure_type,status,reporter,reported_at,reopened_at,reopened_by,notes,lon,lat',
           )
           .limit(2000);
         if (!cancelled && Array.isArray(data)) {
@@ -584,7 +584,7 @@ export default function TeamMap({
       try {
         const { data } = await supabase
           .from('emg_road_statuses')
-          .select('id,status,reporter,reported_at,notes,lon:st_x(geom),lat:st_y(geom)')
+          .select('id,status,reporter,reported_at,notes,lon,lat')
           .limit(2000);
         if (!cancelled && Array.isArray(data)) {
           store.statusPins = data as unknown as RoadStatusPin[];
@@ -597,7 +597,7 @@ export default function TeamMap({
       try {
         const { data } = await supabase
           .from('emg_path_tracks')
-          .select('id,inspector,geojson:st_asgeojson(geom)')
+          .select('id,inspector,geojson')
           .limit(1000);
         if (!cancelled && Array.isArray(data)) {
           store.paths = data as unknown as PathTrack[];
@@ -612,7 +612,7 @@ export default function TeamMap({
           const { data } = await supabase
             .from('emg_team_positions')
             .select(
-              'inspector,lon:st_x(geom),lat:st_y(geom),updated_at,assignment,completed_count,pending_count',
+              'inspector,lon,lat,updated_at,assignment,completed_count,pending_count',
             )
             .limit(500);
           if (!cancelled && Array.isArray(data)) {
