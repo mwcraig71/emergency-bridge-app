@@ -607,9 +607,11 @@ const FieldApp: React.FC = () => {
   };
 
   const renderMap = () => (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 64 }}>
+    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 64, zIndex: 1 }}>
       <TeamMap
         showTeam
+        showLocate
+        height="100%"
         onStartInspection={handleSelectBridge}
         onGetDirections={(b) => setDirectionsBridge(b)}
       />
@@ -628,6 +630,34 @@ const FieldApp: React.FC = () => {
 
   const renderSync = () => (
     <div className="screen">
+      <div className="card">
+        <h3 style={{ marginTop: 0 }}>Settings</h3>
+        <label
+          htmlFor="inspector-name"
+          style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}
+        >
+          Inspector name
+        </label>
+        <input
+          id="inspector-name"
+          className="field"
+          type="text"
+          value={inspectorName}
+          onChange={(e) => handleNameChange(e.target.value)}
+          placeholder="Your name"
+          autoComplete="name"
+          disabled={!nameLoaded}
+          style={{ minHeight: 48, fontSize: 18, width: '100%' }}
+        />
+        {nameHint && (
+          <div
+            role="alert"
+            style={{ marginTop: 8, color: '#b00020', fontWeight: 600 }}
+          >
+            Name required before inspecting.
+          </div>
+        )}
+      </div>
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Sync</h3>
         <div className="muted" style={{ marginBottom: 12 }}>
@@ -741,34 +771,6 @@ const FieldApp: React.FC = () => {
 
   return (
     <div style={{ minHeight: '100vh', paddingBottom: 80 }}>
-      <div className="card" style={{ position: 'sticky', top: 0, zIndex: 10 }}>
-        <label
-          htmlFor="inspector-name"
-          style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}
-        >
-          Inspector name
-        </label>
-        <input
-          id="inspector-name"
-          className="field"
-          type="text"
-          value={inspectorName}
-          onChange={(e) => handleNameChange(e.target.value)}
-          placeholder="Your name"
-          autoComplete="name"
-          disabled={!nameLoaded}
-          style={{ minHeight: 48, fontSize: 18, width: '100%' }}
-        />
-        {nameHint && (
-          <div
-            role="alert"
-            style={{ marginTop: 8, color: '#b00020', fontWeight: 600 }}
-          >
-            Name required before inspecting.
-          </div>
-        )}
-      </div>
-
       {tab === 'inspect' && renderInspect()}
       {tab === 'map' && renderMap()}
       {tab === 'closure' && renderClosure()}
