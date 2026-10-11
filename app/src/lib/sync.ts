@@ -82,6 +82,10 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
         .from('emg_inspections')
         .upsert(row, { onConflict: 'client_inspection_id' });
       if (error) throw new Error(error.message);
+      // Team assignment bookkeeping — best effort, never fails the push.
+      await markAssignmentComplete(sb, d.asset_id, d.inspector_name).catch(
+        () => {},
+      );
       break;
     }
     case 'roadblock': {
@@ -140,4 +144,59 @@ export async function pendingCount(): Promise<number> {
 
 export function isSyncConfigured(): boolean {
   return isSupabaseConfigured();
+}
+
+/**
+ * Team assignment bookkeeping after an inspection push.
+ *
+ * Marks the bridge's assignment complete (if one exists and is not already
+ * complete) and, when someone other than the assignee did the inspection,
+ * inserts a notification for the assignee.
+ *
+ * Best-effort: failures are swallowed by the caller so the inspection
+ * push itself is never affected.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function markAssignmentComplete(
+  sb: any,
+  assetId: string,
+  inspectorName: string,
+): Promise<void> {
+  const now = new Date().toISOString();
+  const { data } = await sb
+    .from('emg_assignments')
+    .select('id,assigned_to,status')
+    .eq('asset_id', assetId)
+    .order('assigned_at', { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const row = data as {
+    id: string;
+    assigned_to: string;
+    status: string;
+  } | null;
+  if (!row || row.status === 'complete') return;
+
+  const { error: updateError } = await sb
+    .from('emg_assignments')
+    .update({
+      status: 'complete',
+      completed_by: inspectorName,
+      completed_at: now,
+    })
+    .eq('id', row.id);
+  if (updateError) throw new Error(updateError.message);
+
+  // Cross-assignment: tell the assignee someone else did their bridge.
+  const assignee = (row.assigned_to ?? '').trim();
+  if (assignee && assignee.toLowerCase() !== inspectorName.trim().toLowerCase()) {
+    const { error: notifError } = await sb.from('emg_notifications').insert({
+      recipient: assignee,
+      type: 'bridge_completed_by_other',
+      title: `Bridge ${assetId} inspected`,
+      message: `${inspectorName} inspected your assigned bridge ${assetId}.`,
+      related_asset_id: assetId,
+    });
+    if (notifError) throw new Error(notifError.message);
+  }
 }
