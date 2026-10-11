@@ -330,13 +330,16 @@ export default function TriageFlow(props: TriageFlowProps) {
       const finalDraft: InspectionDraft = { ...draft, triage_list: triage };
       try {
         await idbPut('drafts', finalDraft);
-      } catch {
-        /* silent */
+      } catch (err) {
+        console.error('Failed to save draft:', err);
+        alert('Could not save inspection draft. Please try again.');
+        return;
       }
       try {
         await enqueue('inspection', finalDraft);
-      } catch {
-        /* silent */
+      } catch (err) {
+        console.error('Failed to queue inspection:', err);
+        alert('Inspection saved locally but could not be queued for sync. Please try syncing manually.');
       }
       onDone(finalDraft);
     },
@@ -404,17 +407,23 @@ export default function TriageFlow(props: TriageFlowProps) {
         <div className="seg" role="group" aria-label="Was the bridge destroyed?">
           <button
             type="button"
-            className={`btn${draft.triage_list === 'destroyed' ? ' active' : ' secondary'}`}
+            className={`btn${draft.destroyed === 'yes' ? ' active' : ' secondary'}`}
             style={{ flex: 1, minHeight: 56 }}
-            onClick={() => setStep('destroyed_photos')}
+            onClick={() => {
+              setYesNo('destroyed', 'yes');
+              setStep('destroyed_photos');
+            }}
           >
             Yes
           </button>
           <button
             type="button"
-            className="btn secondary"
+            className={`btn${draft.destroyed === 'no' ? ' active' : ' secondary'}`}
             style={{ flex: 1, minHeight: 56 }}
-            onClick={() => setStep('access')}
+            onClick={() => {
+              setYesNo('destroyed', 'no');
+              setStep('access');
+            }}
           >
             No
           </button>
@@ -462,17 +471,23 @@ export default function TriageFlow(props: TriageFlowProps) {
       <div className="seg" role="group" aria-label="Were you able to access the bridge?">
         <button
           type="button"
-          className="btn"
+          className={`btn${draft.access === 'yes' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
-          onClick={() => setStep('overtopped')}
+          onClick={() => {
+            setYesNo('access', 'yes');
+            setStep('overtopped');
+          }}
         >
           Yes
         </button>
         <button
           type="button"
-          className="btn secondary"
+          className={`btn${draft.access === 'no' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
-          onClick={() => setStep('drone')}
+          onClick={() => {
+            setYesNo('access', 'no');
+            setStep('drone');
+          }}
         >
           No
         </button>
@@ -486,17 +501,23 @@ export default function TriageFlow(props: TriageFlowProps) {
       <div className="seg" role="group" aria-label="Was drone reconnaissance used?">
         <button
           type="button"
-          className="btn"
+          className={`btn${draft.drone_used === 'yes' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
-          onClick={() => setStep('still_there')}
+          onClick={() => {
+            setYesNo('drone_used', 'yes');
+            setStep('still_there');
+          }}
         >
           Yes
         </button>
         <button
           type="button"
-          className="btn secondary"
+          className={`btn${draft.drone_used === 'no' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
-          onClick={() => setStep('revisit_note')}
+          onClick={() => {
+            setYesNo('drone_used', 'no');
+            setStep('revisit_note');
+          }}
         >
           No
         </button>
@@ -536,17 +557,23 @@ export default function TriageFlow(props: TriageFlowProps) {
       <div className="seg" role="group" aria-label="Is the bridge still there?">
         <button
           type="button"
-          className="btn"
+          className={`btn${draft.bridge_still_there === 'no' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
-          onClick={() => setStep('review_likely_destroyed')}
+          onClick={() => {
+            setYesNo('bridge_still_there', 'no');
+            setStep('review_likely_destroyed');
+          }}
         >
           No
         </button>
         <button
           type="button"
-          className="btn secondary"
+          className={`btn${draft.bridge_still_there === 'yes' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
-          onClick={() => finish('ground_followup')}
+          onClick={() => {
+            setYesNo('bridge_still_there', 'yes');
+            finish('ground_followup');
+          }}
         >
           Yes
         </button>
