@@ -1,0 +1,40 @@
+# Render blueprint: Emergency Bridge Inspection dashboard + NBI import API.
+# One web service serves the built SPA (app/dist) and the Python import API
+# (server/app.py) from the same origin, so the dashboard needs no CORS setup.
+#
+# Deploy: push this repo to GitHub, then Render Dashboard -> New -> Blueprint
+# and point it at the repo. Set the sync:false vars below in the Render
+# dashboard (they are secrets and are NOT committed).
+
+services:
+  - type: web
+    name: emergency-bridge-app
+    runtime: python
+    plan: free
+    buildCommand: "cd app && npm install && npm run build"
+    startCommand: "python server/app.py"
+    healthCheckPath: /
+    envVars:
+      - key: PORT
+        value: 10000
+      - key: SUPABASE_URL
+        value: https://qyymkvjvqofcaeustqqy.supabase.co
+      - key: SUPABASE_SERVICE_ROLE_KEY
+        sync: false            # <-- set in Render dashboard (Supabase -> API keys -> secret)
+      - key: IMPORT_TOKEN
+        sync: false            # <-- set in Render dashboard (any long random string)
+      - key: VITE_SUPABASE_URL
+        value: https://qyymkvjvqofcaeustqqy.supabase.co
+      - key: VITE_SUPABASE_ANON_KEY
+        sync: false            # <-- set in Render dashboard (Supabase -> API keys -> publishable)
+      - key: VITE_IMPORT_TOKEN
+        sync: false            # <-- same value as IMPORT_TOKEN (sent as x-import-token header)
+
+# Notes:
+# - VITE_* vars are baked into the client bundle at BUILD time. Changing the
+#   anon key or import token requires a redeploy (Render auto-redeploys when
+#   env vars change).
+# - The Python server needs no pip dependencies (stdlib only); the build step
+#   only installs the Node app.
+# - Local dev: run `python server/app.py` (port 8000) and `npm run dev`
+#   in app/ (vite proxies /api -> localhost:8000).
