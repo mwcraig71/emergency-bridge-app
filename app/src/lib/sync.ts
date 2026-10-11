@@ -159,6 +159,14 @@ export async function pendingCount(): Promise<number> {
   return q.length + drafts.filter((d) => d.sync_status === 'pending').length;
 }
 
+/** Clear all items from the sync queue. Use when a stuck item can't be fixed. */
+export async function clearQueue(): Promise<void> {
+  const items = await idbGetAll<SyncQueueItem>('syncQueue');
+  for (const item of items) {
+    await idbDelete('syncQueue', item.id);
+  }
+}
+
 export function isSyncConfigured(): boolean {
   return isSupabaseConfigured();
 }
