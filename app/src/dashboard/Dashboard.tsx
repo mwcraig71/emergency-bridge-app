@@ -4,6 +4,7 @@ import RoadNetworkPanel from './RoadNetworkPanel';
 import ActivityFeed from './ActivityFeed';
 import DataIntake from './DataIntake';
 import UploadNbi from './UploadNbi';
+import AssignmentsPanel from './AssignmentsPanel';
 import TeamMap from '../components/TeamMap';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import { idbGetAll } from '../lib/idb';
@@ -29,7 +30,7 @@ export default function Dashboard() {
   const [bridge, setBridge] = useState<Bridge | null>(null);
   const [inspections, setInspections] = useState<BridgeInspection[] | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [view, setView] = useState<'overview' | 'upload'>('overview');
+  const [view, setView] = useState<'overview' | 'upload' | 'assignments'>('overview');
 
   const handleSelectBridge = useCallback((assetId: string) => {
     setSelectedAssetId(assetId);
@@ -121,6 +122,13 @@ export default function Dashboard() {
           >
             Upload NBI state file
           </button>
+          <button
+            type="button"
+            className={view === 'assignments' ? 'active' : ''}
+            onClick={() => setView('assignments')}
+          >
+            Assignments
+          </button>
         </nav>
       </header>
 
@@ -128,6 +136,12 @@ export default function Dashboard() {
         <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
           <main className="dash-main">
             <UploadNbi />
+          </main>
+        </div>
+      ) : view === 'assignments' ? (
+        <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <main className="dash-main">
+            <AssignmentsPanel />
           </main>
         </div>
       ) : (
