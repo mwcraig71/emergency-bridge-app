@@ -55,6 +55,14 @@ export default function PhotoSection(props: PhotoSectionProps): React.JSX.Elemen
         <button type="button" className="rm" aria-label="Remove photo" onClick={() => onRemove(p.id)}>
           ×
         </button>
+        <input
+          className="photo-note"
+          type="text"
+          value={p.description ?? ''}
+          placeholder="Add a note…"
+          onChange={(e) => onDescribe(p.id, e.target.value)}
+          aria-label="Photo note"
+        />
       </div>
     ));
   };
@@ -62,14 +70,14 @@ export default function PhotoSection(props: PhotoSectionProps): React.JSX.Elemen
   const renderAdd = (type: PhotoType, label: string) => (
     <button
       type="button"
-      className="photo-add"
+      className="photo-add-compact"
       disabled={busy}
       onClick={() => {
         void onCapture(type);
       }}
       aria-label={label}
     >
-      {busy ? 'Capturing…' : 'Add photo'}
+      {busy ? 'Capturing…' : '+ Add photo'}
     </button>
   );
 
@@ -134,16 +142,17 @@ export default function PhotoSection(props: PhotoSectionProps): React.JSX.Elemen
         {conditionPhotos.map((p) => (
           <div key={p.id} className="photo-item">
             {p.dataUrl ? <img src={p.dataUrl} alt={p.description ?? ''} /> : null}
-            <input
-              className="field"
-              type="text"
-              value={p.description ?? ''}
-              placeholder="What does this photo show?"
-              onChange={(e) => onDescribe(p.id, e.target.value)}
-            />
             <button type="button" className="rm" aria-label="Remove photo" onClick={() => onRemove(p.id)}>
               ×
             </button>
+            <input
+              className="photo-note"
+              type="text"
+              value={p.description ?? ''}
+              placeholder="Add a note…"
+              onChange={(e) => onDescribe(p.id, e.target.value)}
+              aria-label="Photo note"
+            />
           </div>
         ))}
       </div>
