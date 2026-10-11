@@ -611,6 +611,7 @@ const FieldApp: React.FC = () => {
       <TeamMap
         showTeam
         showLocate
+        showOfflineDownload
         height="100%"
         onStartInspection={handleSelectBridge}
         onGetDirections={(b) => setDirectionsBridge(b)}
