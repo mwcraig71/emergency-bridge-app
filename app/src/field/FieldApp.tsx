@@ -6,7 +6,7 @@ import DirectionsView from './DirectionsView';
 import TeamMap from '../components/TeamMap';
 import type { Bridge, InspectionDraft, ActiveSession, Assignment, AppNotification } from '../types';
 import { idbGetAll, idbPut, idbGet, idbDelete } from '../lib/idb';
-import { pushQueue, pendingCount } from '../lib/sync';
+import { pushQueue, pendingCount, clearQueue } from '../lib/sync';
 import {
   syncAssignments,
   syncNotifications,
@@ -642,9 +642,25 @@ const FieldApp: React.FC = () => {
           {syncing ? 'Syncing…' : 'Sync now'}
         </button>
         {syncResult && (
-          <div className="muted" style={{ marginTop: 12 }}>
+          <div className="muted" style={{ marginTop: 12, whiteSpace: 'pre-wrap' }}>
             {syncResult}
           </div>
+        )}
+        {pending > 0 && (
+          <button
+            className="btn"
+            type="button"
+            onClick={async () => {
+              if (window.confirm(`Clear ${pending} queued item(s)? This cannot be undone.`)) {
+                await clearQueue();
+                setPending(0);
+                setSyncResult('Queue cleared.');
+              }
+            }}
+            style={{ marginTop: 8, background: '#fff', color: '#b00020', border: '1px solid #b00020' }}
+          >
+            Clear sync queue ({pending})
+          </button>
         )}
       </div>
       <div className="card">
