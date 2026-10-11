@@ -6,7 +6,7 @@
 // cached tiles when offline via a custom protocol handler.
 //
 // Tile source: Carto Positron vector tiles (same as the online style).
-// Tile URL template: https://tiles.basemaps.cartocdn.com/vector/carto.streets/v1/{z}/{x}/{y}.mvt
+// Tile URL template (verified 2026-10-11): https://tiles-a.basemaps.cartocdn.com/vectortiles/carto.streets/v1/{z}/{x}/{y}.mvt
 
 import { idbGet, idbPut, idbDelete, idbGetAll, idbCount } from './idb';
 
@@ -52,9 +52,9 @@ export interface StoredTile {
 /** Stored area record in the `offlineAreas` object store. */
 export type StoredArea = OfflineArea;
 
-/** Carto vector tile URL template. */
+/** Carto vector tile URL template (from tiles.json). */
 export const TILE_URL_TEMPLATE =
-  'https://tiles.basemaps.cartocdn.com/vector/carto.streets/v1/{z}/{x}/{y}.mvt';
+  'https://tiles-a.basemaps.cartocdn.com/vectortiles/carto.streets/v1/{z}/{x}/{y}.mvt';
 
 /** Custom protocol scheme used to route tile requests through the offline cache. */
 export const OFFLINE_PROTOCOL = 'offline-tile';
