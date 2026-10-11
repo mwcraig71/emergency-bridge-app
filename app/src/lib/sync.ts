@@ -60,7 +60,7 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
         inspector_name: d.inspector_name,
         inspection_datetime: d.inspection_datetime,
         device_id: d.device_id ?? null,
-        destroyed: d.destroyed,
+        destroyed: d.destroyed ?? 'no',
         access: d.access,
         drone_used: d.drone_used,
         bridge_still_there: d.bridge_still_there,
