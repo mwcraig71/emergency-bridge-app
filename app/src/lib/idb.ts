@@ -3,7 +3,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'emergency-bridge-app';
-const DB_VERSION = 3;
+const DB_VERSION = 4;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -33,6 +33,11 @@ function db(): Promise<IDBPDatabase> {
         // v3: bulk assignment buckets
         if (!d.objectStoreNames.contains('buckets'))
           d.createObjectStore('buckets', { keyPath: 'id' });
+        // v4: offline map tiles + named offline areas
+        if (!d.objectStoreNames.contains('offlineTiles'))
+          d.createObjectStore('offlineTiles', { keyPath: 'key' });
+        if (!d.objectStoreNames.contains('offlineAreas'))
+          d.createObjectStore('offlineAreas', { keyPath: 'id' });
       },
     });
   }
