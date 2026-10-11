@@ -154,3 +154,22 @@ table.data tr:hover td { background: #f6f9fc; cursor: pointer; }
 .feed-item time { color: var(--muted); font-size: 12px; display: block; }
 .warn-box { background: #fff8e6; border: 1px solid #f0d488; border-radius: 10px; padding: 12px; margin: 12px 0; font-size: 14px; }
 .err-box { background: #fdeeee; border: 1px solid #f0a8a8; border-radius: 10px; padding: 12px; margin: 12px 0; font-size: 14px; }
+.btn.active { background: var(--brand); color: #fff; }
+
+/* Compact add-photo button — small horizontal pill, not a big square */
+.photo-add-compact {
+  display: inline-flex; align-items: center; justify-content: center;
+  padding: 8px 16px; margin: 4px 0;
+  border: 2px dashed var(--line); border-radius: 20px; background: #f8fafc;
+  font-size: 14px; font-weight: 600; color: var(--brand); cursor: pointer;
+  min-height: 36px;
+}
+.photo-add-compact:disabled { opacity: .5; cursor: default; }
+
+/* Photo note input — compact, sits under the thumbnail */
+.photo-note {
+  width: 100%; margin-top: 4px; padding: 6px 8px;
+  font-size: 13px; border: 1px solid var(--line); border-radius: 6px;
+  background: #fff;
+}
+.photo-note::placeholder { color: var(--muted); }
