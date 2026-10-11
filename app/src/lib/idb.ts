@@ -3,7 +3,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'emergency-bridge-app';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -11,12 +11,25 @@ function db(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
       upgrade(d) {
-        d.createObjectStore('bridges', { keyPath: 'asset_id' });
-        d.createObjectStore('districts', { keyPath: 'id' });
-        d.createObjectStore('drafts', { keyPath: 'client_inspection_id' });
-        d.createObjectStore('syncQueue', { keyPath: 'id' });
-        d.createObjectStore('settings', { keyPath: 'key' });
-        d.createObjectStore('meta', { keyPath: 'key' });
+        // contains() guards make this safe for fresh installs (v0→2)
+        // and upgrades (v1→2).
+        if (!d.objectStoreNames.contains('bridges'))
+          d.createObjectStore('bridges', { keyPath: 'asset_id' });
+        if (!d.objectStoreNames.contains('districts'))
+          d.createObjectStore('districts', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('drafts'))
+          d.createObjectStore('drafts', { keyPath: 'client_inspection_id' });
+        if (!d.objectStoreNames.contains('syncQueue'))
+          d.createObjectStore('syncQueue', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('settings'))
+          d.createObjectStore('settings', { keyPath: 'key' });
+        if (!d.objectStoreNames.contains('meta'))
+          d.createObjectStore('meta', { keyPath: 'key' });
+        // v2: team assignments + notifications
+        if (!d.objectStoreNames.contains('assignments'))
+          d.createObjectStore('assignments', { keyPath: 'asset_id' });
+        if (!d.objectStoreNames.contains('notifications'))
+          d.createObjectStore('notifications', { keyPath: 'id' });
       },
     });
   }
