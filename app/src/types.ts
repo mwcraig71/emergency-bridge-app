@@ -212,3 +212,14 @@ export interface AppNotification {
   created_at: string;
   read_at: string | null;
 }
+
+/** Named bucket of bridges for bulk assignment (IndexedDB `buckets` store). */
+export interface Bucket {
+  id: string;
+  name: string;
+  state: 'SC' | 'NC';
+  asset_ids: string[];
+  /** asset_id -> inspector name (only bridges with an inspector assigned). */
+  inspector_map: Record<string, string>;
+  created_at: string;
+}
