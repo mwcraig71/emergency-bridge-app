@@ -7,6 +7,7 @@ import {
   formatDistance,
   formatBearing,
 } from '../lib/geo';
+import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import TeamMap from '../components/TeamMap';
 
 type Props = {
@@ -29,6 +30,20 @@ function isAndroid(): boolean {
 export default function DirectionsView({ bridge, onClose }: Props): React.JSX.Element {
   const [fix, setFix] = useState<GpsFix | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [online, setOnline] = useState<boolean>(() => isOnline());
+  const [nearbyClosures, setNearbyClosures] = useState<number | null>(null);
+
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    setOnline(isOnline());
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
 
   useEffect(() => {
     let stop: (() => void) | null = null;
@@ -50,6 +65,61 @@ export default function DirectionsView({ bridge, onClose }: Props): React.JSX.El
     };
   }, []);
 
+  // Warn about reported road closures near the destination bridge.
+  // Roadblock data lives in Supabase (not cached offline), so this only
+  // runs when online.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      setNearbyClosures(null);
+      if (!bridge || bridge.lat == null || bridge.lon == null) return;
+      if (!isOnline() || !isSupabaseConfigured()) return;
+      const supabase = getSupabase();
+      if (!supabase) return;
+      try {
+        const [{ data: rbs }, { data: pins }] = await Promise.all([
+          supabase
+            .from('emg_roadblocks')
+            .select('lon,lat,status')
+            .eq('status', 'active')
+            .limit(2000),
+          supabase.from('emg_road_statuses').select('lon,lat,status').limit(2000),
+        ]);
+        if (cancelled) return;
+        let count = 0;
+        const RADIUS_M = 5000;
+        const check = (lon: unknown, lat: unknown, closed: boolean) => {
+          if (!closed) return;
+          if (typeof lon !== 'number' || typeof lat !== 'number') return;
+          if (!Number.isFinite(lon) || !Number.isFinite(lat)) return;
+          const d = haversineMeters(bridge.lat, bridge.lon, lat, lon);
+          if (d <= RADIUS_M) count += 1;
+        };
+        for (const r of (rbs ?? []) as Array<{
+          lon?: number;
+          lat?: number;
+          status?: string;
+        }>) {
+          check(r.lon, r.lat, r.status === 'active');
+        }
+        for (const p of (pins ?? []) as Array<{
+          lon?: number;
+          lat?: number;
+          status?: string;
+        }>) {
+          const s = (p.status ?? '').toLowerCase();
+          check(p.lon, p.lat, s.includes('clos'));
+        }
+        setNearbyClosures(count);
+      } catch {
+        // ignore — warning is best-effort
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [bridge]);
+
   const destLat = bridge?.lat ?? null;
   const destLon = bridge?.lon ?? null;
 
@@ -67,7 +137,7 @@ export default function DirectionsView({ bridge, onClose }: Props): React.JSX.El
     if (destLat == null || destLon == null) return;
     let url: string;
     if (isIOS()) {
-      url = `https://maps.apple.com/?daddr=${destLat},${destLon}`;
+      url = `maps://?daddr=${destLat},${destLon}`;
     } else if (isAndroid()) {
       url = `geo:${destLat},${destLon}?q=${destLat},${destLon}`;
     } else {
@@ -158,9 +228,28 @@ export default function DirectionsView({ bridge, onClose }: Props): React.JSX.El
               truth.
             </div>
 
-            <button className="btn" type="button" onClick={handleOpenMaps} style={{ marginTop: 8 }}>
-              Open in Maps app
-            </button>
+            {nearbyClosures != null && nearbyClosures > 0 && (
+              <div className="warn-box" style={{ marginTop: 8 }}>
+                ⚠ {nearbyClosures} road closure{nearbyClosures === 1 ? '' : 's'}{' '}
+                reported near this bridge
+              </div>
+            )}
+
+            {online && (
+              <button
+                className="btn"
+                type="button"
+                onClick={handleOpenMaps}
+                style={{ marginTop: 8 }}
+              >
+                Open in Maps app
+              </button>
+            )}
+            {!online && (
+              <p className="muted" style={{ marginTop: 8 }}>
+                External maps need a data connection — use the compass bearing above while offline.
+              </p>
+            )}
           </>
         )}
       </div>
