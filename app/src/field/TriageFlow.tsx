@@ -13,7 +13,7 @@ import type {
 import { capturePhoto } from '../lib/camera';
 import { getGpsFix } from '../lib/location';
 import { isCoordMismatch } from '../lib/geo';
-import { idbPut } from '../lib/idb';
+import { idbPut, idbGet } from '../lib/idb';
 import { enqueue } from '../lib/sync';
 import PhotoSection from './PhotoSection';
 
@@ -123,7 +123,7 @@ function Segmented<T extends string>(props: SegProps<T>) {
             <button
               key={opt.value}
               type="button"
-              className={`btn${active ? '' : ' secondary'}`}
+              className={`btn${active ? ' active' : ' secondary'}`}
               aria-pressed={active}
               onClick={() => onChange(opt.value)}
               style={{ flex: 1, minHeight: 52 }}
@@ -158,7 +158,7 @@ function ChoiceList<T extends string>(props: ChoiceProps<T>) {
               type="button"
               role="radio"
               aria-checked={active}
-              className={`btn${active ? '' : ' secondary'}`}
+              className={`btn${active ? ' active' : ' secondary'}`}
               onClick={() => onChange(opt.value)}
               style={{ minHeight: 48, textAlign: 'left' }}
             >
@@ -265,6 +265,44 @@ export default function TriageFlow(props: TriageFlowProps) {
     });
   }, [draft]);
 
+  // Crash-resilience heartbeat: refresh the active session's last_active
+  // every 30s so a crash/power loss can offer resume on next launch.
+  useEffect(() => {
+    let cancelled = false;
+    const beat = async () => {
+      try {
+        const session = (await idbGet<{
+          key: string;
+          asset_id: string;
+          last_active: string;
+        }>('settings', 'active_session')) as
+          | (Record<string, unknown> & {
+              key: string;
+              asset_id: string;
+              last_active: string;
+            })
+          | undefined;
+        if (cancelled) return;
+        if (session && session.asset_id === bridge.asset_id) {
+          await idbPut('settings', {
+            ...session,
+            last_active: new Date().toISOString(),
+          });
+        }
+      } catch {
+        /* silent */
+      }
+    };
+    void beat();
+    const timer = setInterval(() => {
+      void beat();
+    }, 30000);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [bridge.asset_id]);
+
   const damageFlags = useMemo(
     () => ({
       rail: draft.damage_rail === 'yes',
@@ -355,7 +393,7 @@ export default function TriageFlow(props: TriageFlowProps) {
         <div className="seg" role="group" aria-label="Was the bridge destroyed?">
           <button
             type="button"
-            className={`btn${draft.triage_list === 'destroyed' ? '' : ' secondary'}`}
+            className={`btn${draft.triage_list === 'destroyed' ? ' active' : ' secondary'}`}
             style={{ flex: 1, minHeight: 56 }}
             onClick={() => setStep('destroyed_photos')}
           >
@@ -542,7 +580,7 @@ export default function TriageFlow(props: TriageFlowProps) {
       <div className="seg" role="group" aria-label="Has the bridge overtopped?">
         <button
           type="button"
-          className={`btn${draft.overtopped === 'yes' ? '' : ' secondary'}`}
+          className={`btn${draft.overtopped === 'yes' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
           onClick={() =>
             setDraft((d) => ({
@@ -557,7 +595,7 @@ export default function TriageFlow(props: TriageFlowProps) {
         </button>
         <button
           type="button"
-          className={`btn${draft.overtopped === 'no' ? '' : ' secondary'}`}
+          className={`btn${draft.overtopped === 'no' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
           onClick={() =>
             setDraft((d) => ({
