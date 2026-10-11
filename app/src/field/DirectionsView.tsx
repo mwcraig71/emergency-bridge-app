@@ -149,11 +149,33 @@ export default function DirectionsView({ bridge, onClose }: Props): React.JSX.El
   const position = fix ? { lon: fix.lon, lat: fix.lat } : null;
 
   return (
-    <div className="sheet-backdrop">
-      <div className="sheet">
+    <div className="directions-fullscreen">
+      <div className="directions-header">
+        {!bridge ? (
+          <h2 style={{ margin: 0 }}>No destination</h2>
+        ) : (
+          <>
+            <button
+              className="btn"
+              type="button"
+              onClick={onClose}
+              aria-label="Close"
+              style={{ flex: '0 0 auto' }}
+            >
+              ✕
+            </button>
+            <div style={{ flex: 1 }}>
+              <div style={{ fontWeight: 700 }}>{bridge.asset_id}</div>
+              <div className="muted" style={{ fontSize: 13 }}>
+                {[bridge.facility, bridge.feature].filter(Boolean).join(' over ')}
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+      <div className="directions-body">
         {!bridge ? (
           <>
-            <h2>No destination</h2>
             <p className="muted">Select a bridge to get directions.</p>
             <button className="btn" type="button" onClick={onClose}>
               Close
@@ -161,24 +183,6 @@ export default function DirectionsView({ bridge, onClose }: Props): React.JSX.El
           </>
         ) : (
           <>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-              <button
-                className="btn"
-                type="button"
-                onClick={onClose}
-                aria-label="Close"
-                style={{ flex: '0 0 auto' }}
-              >
-                Close
-              </button>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontWeight: 700 }}>{bridge.asset_id}</div>
-                <div className="muted">
-{[bridge.facility, bridge.feature].filter(Boolean).join(' over ')}
-                  {bridge.location ? ` · ${bridge.location}` : ''}
-                </div>
-              </div>
-            </div>
 
             <div style={{ display: 'flex', alignItems: 'center', gap: 16, marginTop: 12 }}>
               <div
