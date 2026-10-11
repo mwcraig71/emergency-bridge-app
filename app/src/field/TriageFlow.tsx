@@ -316,6 +316,17 @@ export default function TriageFlow(props: TriageFlowProps) {
 
   const finish = useCallback(
     async (triage: TriageList) => {
+      // Validate required fields before queuing — don't let incomplete
+      // inspections into the sync queue.
+      const missing: string[] = [];
+      if (!draft.destroyed) missing.push('Was the bridge destroyed?');
+      if (!draft.inspector_name?.trim()) missing.push('Inspector name');
+      if (missing.length > 0) {
+        alert(
+          `Cannot finish inspection. Please complete:\n• ${missing.join('\n• ')}`
+        );
+        return;
+      }
       const finalDraft: InspectionDraft = { ...draft, triage_list: triage };
       try {
         await idbPut('drafts', finalDraft);
