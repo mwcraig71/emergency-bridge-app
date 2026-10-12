@@ -262,3 +262,51 @@ export interface Bucket {
   inspector_map: Record<string, string>;
   created_at: string;
 }
+
+// ---------------------------------------------------------------------------
+// DriveNC (NCDOT) secondary data — cached in IndexedDB, rendered dimmed
+// UNDER inspector ground-truth pins. Inspector pins always win visually.
+// ---------------------------------------------------------------------------
+
+/** NCDOT DriveNC traffic event (closures, incidents, roadwork). */
+export interface DriveNCEvent {
+  /** DriveNC event ID (stable across refreshes). */
+  id: string;
+  roadway: string;
+  direction: string;
+  description: string;
+  event_type: 'closures' | 'accidentsAndIncidents' | 'roadwork' | string;
+  event_subtype: string;
+  is_full_closure: boolean;
+  severity: string;
+  lanes_affected: string;
+  county: string;
+  lon: number;
+  lat: number;
+  reported: string; // ISO
+  last_updated: string; // ISO
+  detour_instructions: string[];
+}
+
+/** NCDOT overhead message sign. */
+export interface DriveNCSign {
+  id: string;
+  name: string;
+  roadway: string;
+  direction: string;
+  messages: string[];
+  county: string;
+  lon: number;
+  lat: number;
+  last_updated: string; // ISO
+}
+
+/** NCDOT WZDx work zone (geometry carried as GeoJSON). */
+export interface DriveNCWorkZone {
+  id: string;
+  road_names: string[];
+  direction: string;
+  description: string;
+  geometry: GeoJSON.Geometry;
+  last_updated: string; // ISO
+}

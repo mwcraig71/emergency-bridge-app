@@ -3,7 +3,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'emergency-bridge-app';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -61,6 +61,17 @@ function db(): Promise<IDBPDatabase> {
         // the 'active_track' key in the meta store (crash-safe).
         if (!d.objectStoreNames.contains('tracks'))
           d.createObjectStore('tracks', { keyPath: 'id' });
+        // v9: DriveNC (NCDOT) secondary data — cached for offline map display.
+        // Inspector ground-truth pins always render on top in full color;
+        // DriveNC renders dimmed underneath. Three stores: events, signs,
+        // work zones. Refreshed from the DriveNC API when online (see
+        // lib/drivedata.ts); the frontend never calls the API directly.
+        if (!d.objectStoreNames.contains('drivenc_events'))
+          d.createObjectStore('drivenc_events', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('drivenc_signs'))
+          d.createObjectStore('drivenc_signs', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('drivenc_workzones'))
+          d.createObjectStore('drivenc_workzones', { keyPath: 'id' });
       },
     });
   }

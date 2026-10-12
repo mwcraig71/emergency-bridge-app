@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
-import type { Bridge, Roadblock, RoadStatusPin, PathTrack, TeamPosition } from '../types';
+import type { Bridge, Roadblock, RoadStatusPin, PathTrack, TeamPosition, DriveNCEvent, DriveNCSign, DriveNCWorkZone } from '../types';
 import { createTilePackProvider } from '../lib/tilepacks';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import { idbGetAll } from '../lib/idb';
@@ -357,6 +357,9 @@ export default function TeamMap({
     paths: PathTrack[];
     team: TeamPosition[];
     triageByAsset: Map<string, string>;
+    drivencEvents: DriveNCEvent[];
+    drivencSigns: DriveNCSign[];
+    drivencWorkzones: DriveNCWorkZone[];
   }>({
     bridges: [],
     roadblocks: [],
@@ -364,7 +367,28 @@ export default function TeamMap({
     paths: [],
     team: [],
     triageByAsset: new Map(),
+    drivencEvents: [],
+    drivencSigns: [],
+    drivencWorkzones: [],
   });
+
+  // DriveNC overlay toggles — default ON (dimmed). Inspector ground-truth
+  // pins always render on top in full color regardless of toggle state.
+  const [showDriveNCEvents, setShowDriveNCEvents] = useState(true);
+  const [showDriveNCSigns, setShowDriveNCSigns] = useState(true);
+  const [showDriveNCWorkzones, setShowDriveNCWorkzones] = useState(true);
+  const showDriveNCEventsRef = useRef(true);
+  const showDriveNCSignsRef = useRef(true);
+  const showDriveNCWorkzonesRef = useRef(true);
+  useEffect(() => {
+    showDriveNCEventsRef.current = showDriveNCEvents;
+  }, [showDriveNCEvents]);
+  useEffect(() => {
+    showDriveNCSignsRef.current = showDriveNCSigns;
+  }, [showDriveNCSigns]);
+  useEffect(() => {
+    showDriveNCWorkzonesRef.current = showDriveNCWorkzones;
+  }, [showDriveNCWorkzones]);
 
   const onBridgeClickRef = useRef(onBridgeClick);
   useEffect(() => {
@@ -655,6 +679,172 @@ export default function TeamMap({
           },
         });
 
+        // DriveNC overlay sources + layers (SECONDARY source — dimmed gray).
+        // Added BEFORE the roadblocks layer so inspector ground-truth pins
+        // always render on top in full color. Each feed has an independent
+        // toggle; visibility is controlled via layout visibility.
+        map.addSource('drivenc-events', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+        map.addLayer({
+          id: 'drivenc-events-circle',
+          type: 'circle',
+          source: 'drivenc-events',
+          paint: {
+            'circle-radius': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              5,
+              2,
+              10,
+              4,
+              14,
+              6,
+            ],
+            // Dimmed gray signals "secondary NCDOT data, not ground truth".
+            'circle-color': '#9AA0A6',
+            'circle-opacity': 0.55,
+            'circle-stroke-color': '#5F6368',
+            'circle-stroke-width': 0.8,
+            'circle-stroke-opacity': 0.7,
+          },
+        });
+
+        map.addSource('drivenc-signs', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+        map.addLayer({
+          id: 'drivenc-signs-square',
+          type: 'circle',
+          source: 'drivenc-signs',
+          paint: {
+            'circle-radius': [
+              'interpolate',
+              ['linear'],
+              ['zoom'],
+              5,
+              2,
+              10,
+              3,
+              14,
+              5,
+            ],
+            'circle-color': '#BDC1C6',
+            'circle-opacity': 0.5,
+            'circle-stroke-color': '#5F6368',
+            'circle-stroke-width': 1,
+            'circle-stroke-opacity': 0.7,
+          },
+        });
+
+        map.addSource('drivenc-workzones', {
+          type: 'geojson',
+          data: { type: 'FeatureCollection', features: [] },
+        });
+        map.addLayer({
+          id: 'drivenc-workzones-line',
+          type: 'line',
+          source: 'drivenc-workzones',
+          paint: {
+            'line-color': '#9AA0A6',
+            'line-width': 2,
+            'line-opacity': 0.45,
+            'line-dasharray': [4, 3],
+          },
+        });
+
+        // DriveNC popup handlers — every popup is labeled "NCDOT DriveNC".
+        const drivencPopup = (
+          coords: [number, number],
+          title: string,
+          rows: Array<[string, string | null | undefined]>,
+          updatedAt: string | null | undefined,
+        ) => {
+          const allRows: Array<[string, string]> = [
+            ...rows.map(
+              ([k, v]): [string, string] => [k, v ?? '—'],
+            ),
+            ['Source', 'NCDOT DriveNC'],
+            ['Updated', timeAgo(updatedAt)],
+          ];
+          new maplibregl.Popup({ closeButton: true })
+            .setLngLat(coords)
+            .setDOMContent(buildPopup(title, allRows))
+            .addTo(map);
+        };
+
+        map.on('click', 'drivenc-events-circle', (ev) => {
+          const f = ev.features && ev.features[0];
+          if (!f) return;
+          const p = (f.properties || {}) as Record<string, unknown>;
+          const coords =
+            f.geometry && f.geometry.type === 'Point'
+              ? (f.geometry.coordinates as [number, number])
+              : null;
+          if (!coords) return;
+          drivencPopup(
+            coords,
+            escapeText(p.roadway) || 'NCDOT event',
+            [
+              ['Type', escapeText(p.event_type)],
+              ['Description', escapeText(p.description)],
+              ['Severity', escapeText(p.severity)],
+              ['Lanes', escapeText(p.lanes_affected)],
+              ['County', escapeText(p.county)],
+            ],
+            typeof p.last_updated === 'string' ? p.last_updated : null,
+          );
+        });
+        map.on('click', 'drivenc-signs-square', (ev) => {
+          const f = ev.features && ev.features[0];
+          if (!f) return;
+          const p = (f.properties || {}) as Record<string, unknown>;
+          const coords =
+            f.geometry && f.geometry.type === 'Point'
+              ? (f.geometry.coordinates as [number, number])
+              : null;
+          if (!coords) return;
+          drivencPopup(
+            coords,
+            escapeText(p.roadway) || 'Message sign',
+            [
+              ['Message', escapeText(p.message)],
+              ['County', escapeText(p.county)],
+            ],
+            typeof p.last_updated === 'string' ? p.last_updated : null,
+          );
+        });
+        map.on('click', 'drivenc-workzones-line', (ev) => {
+          const f = ev.features && ev.features[0];
+          if (!f) return;
+          const p = (f.properties || {}) as Record<string, unknown>;
+          const coords = ev.lngLat
+            ? ([ev.lngLat.lng, ev.lngLat.lat] as [number, number])
+            : null;
+          if (!coords) return;
+          drivencPopup(
+            coords,
+            (p.road_names as string) || 'Work zone',
+            [['Description', escapeText(p.description)]],
+            typeof p.last_updated === 'string' ? p.last_updated : null,
+          );
+        });
+        for (const layerId of [
+          'drivenc-events-circle',
+          'drivenc-signs-square',
+          'drivenc-workzones-line',
+        ]) {
+          map.on('mouseenter', layerId, () => {
+            map.getCanvas().style.cursor = 'pointer';
+          });
+          map.on('mouseleave', layerId, () => {
+            map.getCanvas().style.cursor = '';
+          });
+        }
+
         // Roadblocks source + layer
         map.addSource('roadblocks', {
           type: 'geojson',
@@ -887,6 +1077,28 @@ export default function TeamMap({
         // ignore
       }
 
+      // Cached DriveNC data (offline-first, secondary source).
+      // Loads from IndexedDB; background refresh happens below when online.
+      try {
+        const {
+          getCachedDriveNCEvents,
+          getCachedDriveNCSigns,
+          getCachedDriveNCWorkZones,
+        } = await import('../lib/drivedata');
+        const [events, signs, workzones] = await Promise.all([
+          getCachedDriveNCEvents(),
+          getCachedDriveNCSigns(),
+          getCachedDriveNCWorkZones(),
+        ]);
+        if (!cancelled) {
+          if (Array.isArray(events)) store.drivencEvents = events;
+          if (Array.isArray(signs)) store.drivencSigns = signs;
+          if (Array.isArray(workzones)) store.drivencWorkzones = workzones;
+        }
+      } catch {
+        // ignore
+      }
+
       if (!isOnline() || !isSupabaseConfigured()) {
         applyLayers();
         return;
@@ -974,6 +1186,30 @@ export default function TeamMap({
         }
       } catch {
         // ignore
+      }
+
+      // DriveNC secondary data — background refresh when online.
+      // Best-effort: failures must not block the rest of the sync.
+      try {
+        const {
+          syncDriveNC,
+          getCachedDriveNCEvents,
+          getCachedDriveNCSigns,
+          getCachedDriveNCWorkZones,
+        } = await import('../lib/drivedata');
+        await syncDriveNC();
+        if (!cancelled) {
+          const [events, signs, workzones] = await Promise.all([
+            getCachedDriveNCEvents(),
+            getCachedDriveNCSigns(),
+            getCachedDriveNCWorkZones(),
+          ]);
+          if (Array.isArray(events)) store.drivencEvents = events;
+          if (Array.isArray(signs)) store.drivencSigns = signs;
+          if (Array.isArray(workzones)) store.drivencWorkzones = workzones;
+        }
+      } catch {
+        // ignore — cached data (if any) stays visible
       }
 
       // Road statuses
@@ -1068,6 +1304,120 @@ export default function TeamMap({
       if (!map || !ready) return;
       const store = dataRef.current;
       const sel = recency;
+
+      // DriveNC overlay (SECONDARY source — dimmed gray, under inspector pins).
+      // Toggles control layer visibility; inspector pins always render on top
+      // regardless of toggle state (their layers were added after these).
+      const setLayerVisible = (
+        layerId: string,
+        visible: boolean,
+      ) => {
+        if (map.getLayer(layerId)) {
+          map.setLayoutProperty(
+            layerId,
+            'visibility',
+            visible ? 'visible' : 'none',
+          );
+        }
+      };
+      setLayerVisible('drivenc-events-circle', showDriveNCEventsRef.current);
+      setLayerVisible('drivenc-signs-square', showDriveNCSignsRef.current);
+      setLayerVisible(
+        'drivenc-workzones-line',
+        showDriveNCWorkzonesRef.current,
+      );
+
+      // DriveNC events → dimmed gray pins
+      const deSrc = map.getSource('drivenc-events') as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      if (deSrc) {
+        const features = store.drivencEvents
+          .map((e) => {
+            if (
+              typeof e.lon !== 'number' ||
+              typeof e.lat !== 'number' ||
+              !Number.isFinite(e.lon) ||
+              !Number.isFinite(e.lat)
+            )
+              return null;
+            return {
+              type: 'Feature' as const,
+              geometry: {
+                type: 'Point' as const,
+                coordinates: [e.lon, e.lat] as [number, number],
+              },
+              properties: {
+                roadway: e.roadway ?? '',
+                event_type: e.event_type ?? '',
+                description: e.description ?? '',
+                severity: e.severity ?? '',
+                lanes_affected: e.lanes_affected ?? '',
+                county: e.county ?? '',
+                last_updated: e.last_updated ?? '',
+              },
+            };
+          })
+          .filter((x): x is NonNullable<typeof x> => x != null);
+        deSrc.setData({ type: 'FeatureCollection', features });
+      }
+
+      // DriveNC message signs → small gray squares
+      const dsSrc = map.getSource('drivenc-signs') as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      if (dsSrc) {
+        const features = store.drivencSigns
+          .map((s) => {
+            if (
+              typeof s.lon !== 'number' ||
+              typeof s.lat !== 'number' ||
+              !Number.isFinite(s.lon) ||
+              !Number.isFinite(s.lat)
+            )
+              return null;
+            return {
+              type: 'Feature' as const,
+              geometry: {
+                type: 'Point' as const,
+                coordinates: [s.lon, s.lat] as [number, number],
+              },
+              properties: {
+                roadway: s.roadway ?? '',
+                message: (s.messages ?? []).join(' | '),
+                county: s.county ?? '',
+                last_updated: s.last_updated ?? '',
+              },
+            };
+          })
+          .filter((x): x is NonNullable<typeof x> => x != null);
+        dsSrc.setData({ type: 'FeatureCollection', features });
+      }
+
+      // DriveNC work zones → gray dashed polylines (WZDx geometry)
+      const dwSrc = map.getSource('drivenc-workzones') as
+        | maplibregl.GeoJSONSource
+        | undefined;
+      if (dwSrc) {
+        const features = store.drivencWorkzones
+          .map((w) => {
+            if (!w.geometry) return null;
+            return {
+              type: 'Feature' as const,
+              geometry: w.geometry as GeoJSON.Geometry,
+              properties: {
+                road_names: (w.road_names ?? []).join(', '),
+                description: w.description ?? '',
+                last_updated: w.last_updated ?? '',
+              },
+            };
+          })
+          .filter((x): x is NonNullable<typeof x> => x != null);
+        dwSrc.setData({
+          type: 'FeatureCollection',
+          features: features as GeoJSON.Feature[],
+        });
+      }
 
       // Bridges (assignment-filtered: NBI inventory is background data)
       const bridgeFeatures = buildBridgeFeatures(
@@ -1255,6 +1605,24 @@ export default function TeamMap({
       cancelled = true;
     };
   }, [ready, recency, showTeam]);
+
+  // Re-apply DriveNC layer visibility when toggles change (no data re-fetch).
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const apply = (layerId: string, visible: boolean) => {
+      if (map.getLayer(layerId)) {
+        map.setLayoutProperty(
+          layerId,
+          'visibility',
+          visible ? 'visible' : 'none',
+        );
+      }
+    };
+    apply('drivenc-events-circle', showDriveNCEvents);
+    apply('drivenc-signs-square', showDriveNCSigns);
+    apply('drivenc-workzones-line', showDriveNCWorkzones);
+  }, [ready, showDriveNCEvents, showDriveNCSigns, showDriveNCWorkzones]);
 
   // Re-apply the bridge layer when the assignment filter changes (toggle or
   // assignments refresh) without re-running the full data fetch.
@@ -1462,6 +1830,56 @@ export default function TeamMap({
         </select>
       </div>
 
+      {/* DriveNC layer toggles — secondary NCDOT source, dimmed on map */}
+      <div
+        style={{
+          position: 'absolute',
+          top: 48,
+          left: 8,
+          zIndex: 5,
+          background: 'rgba(0,26,82,0.92)',
+          color: '#FFFFFF',
+          padding: '6px 8px',
+          borderRadius: 2,
+          fontSize: 12,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 4,
+        }}
+      >
+        <div style={{ fontWeight: 700, fontSize: 11, color: '#BDC1C6' }}>
+          NCDOT DriveNC
+        </div>
+        {(
+          [
+            ['Events', showDriveNCEvents, setShowDriveNCEvents],
+            ['Signs', showDriveNCSigns, setShowDriveNCSigns],
+            ['Work zones', showDriveNCWorkzones, setShowDriveNCWorkzones],
+          ] as Array<[string, boolean, (v: boolean) => void]>
+        ).map(([label, checked, set]) => (
+          <label
+            key={label}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 6,
+              cursor: 'pointer',
+              minHeight: 28,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => set(e.target.checked)}
+              style={{ width: 18, height: 18, accentColor: '#9AA0A6' }}
+            />
+            <span style={{ color: checked ? '#FFFFFF' : '#9AA0A6' }}>
+              {label}
+            </span>
+          </label>
+        ))}
+      </div>
+
       {/* Offline map download button (field app) */}
       {showOfflineDownload && (
         <div
@@ -1520,6 +1938,8 @@ export default function TeamMap({
           ['#B9C6E8', 'Not started'],
           ['#dc2626', 'Roadblock (active)'],
           ['#0ea5e9', 'Team active'],
+          ['#9AA0A6', 'NCDOT event (secondary)'],
+          ['#BDC1C6', 'NCDOT sign (secondary)'],
         ].map(([c, label]) => (
           <div key={label} style={{ display: 'flex', alignItems: 'center' }}>
             <span
