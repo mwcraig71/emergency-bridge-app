@@ -866,6 +866,17 @@ export default function TeamMap({
         // ignore
       }
 
+      // Cached roadblocks (offline-first, onX model)
+      try {
+        const { getCachedRoadblocks } = await import('../lib/roadblocks');
+        const roadblocks = await getCachedRoadblocks();
+        if (!cancelled && Array.isArray(roadblocks)) {
+          store.roadblocks = roadblocks;
+        }
+      } catch {
+        // ignore
+      }
+
       if (!isOnline() || !isSupabaseConfigured()) {
         applyLayers();
         return;

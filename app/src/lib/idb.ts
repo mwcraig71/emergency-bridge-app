@@ -3,7 +3,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'emergency-bridge-app';
-const DB_VERSION = 6;
+const DB_VERSION = 7;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -51,6 +51,11 @@ function db(): Promise<IDBPDatabase> {
         // The contains() guard keeps v5→v6 upgrades and fresh installs clean.
         if (!d.objectStoreNames.contains('photos'))
           d.createObjectStore('photos', { keyPath: 'id' });
+        // v7: cached roadblocks for offline map display (onX model).
+        // Synced from emg_roadblocks when online; read from cache first
+        // so closure pins are visible without network.
+        if (!d.objectStoreNames.contains('roadblocks'))
+          d.createObjectStore('roadblocks', { keyPath: 'id' });
       },
     });
   }

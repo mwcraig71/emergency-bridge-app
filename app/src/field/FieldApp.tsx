@@ -15,6 +15,7 @@ import {
   isSameSession,
 } from '../lib/crashSession';
 import { pushQueue, pendingCount, pendingPhotos, clearQueue } from '../lib/sync';
+import { syncRoadblocks } from '../lib/roadblocks';
 import {
   syncAssignments,
   syncNotifications,
@@ -402,6 +403,12 @@ const FieldApp: React.FC = () => {
         await refreshAssignments(inspectorName);
       } catch {
         // Team sync failure must not mask the main sync result.
+      }
+      // Roadblocks: pull latest closures for offline map display (best effort).
+      try {
+        await syncRoadblocks();
+      } catch {
+        // Roadblock sync failure must not mask the main sync result.
       }
       setSyncResult(
         result.failed > 0

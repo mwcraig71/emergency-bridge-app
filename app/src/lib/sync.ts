@@ -184,6 +184,42 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
       }
       break;
     }
+    case 'road_status': {
+      // Update the status of an existing roadblock (e.g. mark reopened).
+      // Payload: { id: string; status: 'active' | 'reopened'; reopened_at?: string; reopened_by?: string }
+      const s = item.payload as {
+        id: string;
+        status: 'active' | 'reopened';
+        reopened_at?: string;
+        reopened_by?: string;
+      };
+      const { error } = await sb
+        .from('emg_roadblocks')
+        .update({
+          status: s.status,
+          reopened_at: s.reopened_at ?? null,
+          reopened_by: s.reopened_by ?? null,
+        })
+        .eq('id', s.id);
+      if (error) throw new Error(error.message);
+      // Update the local cache too so the map reflects the change offline.
+      try {
+        const { getCachedRoadblocks, cacheRoadblock } = await import('./roadblocks');
+        const cached = await getCachedRoadblocks();
+        const existing = cached.find((r) => r.id === s.id);
+        if (existing) {
+          await cacheRoadblock({
+            ...existing,
+            status: s.status,
+            reopened_at: s.reopened_at ?? existing.reopened_at,
+            reopened_by: s.reopened_by ?? existing.reopened_by,
+          });
+        }
+      } catch {
+        // Non-fatal: cache will refresh on next syncRoadblocks().
+      }
+      break;
+    }
     default:
       throw new Error(`pushOne: unsupported kind ${item.kind}`);
   }

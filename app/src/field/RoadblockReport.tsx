@@ -104,6 +104,7 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
   const [existing, setExisting] = useState<Roadblock[]>([]);
   const [existingError, setExistingError] = useState<string | null>(null);
   const [queued, setQueued] = useState<Roadblock[]>([]);
+  const [lastSync, setLastSync] = useState<string | null>(null);
   const [photoMap, setPhotoMap] = useState<Record<string, string>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
@@ -128,44 +129,58 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
 
   const loadExisting = useCallback(async () => {
     setExistingError(null);
+    // 1. Read from local cache FIRST — instant, works offline (onX model).
+    try {
+      const { getCachedRoadblocks, getRoadblocksLastSync } = await import(
+        '../lib/roadblocks'
+      );
+      const cached = await getCachedRoadblocks();
+      setExisting(cached.slice(0, 50));
+      const ts = await getRoadblocksLastSync();
+      setLastSync(ts);
+    } catch {
+      // Cache read failed — continue to network attempt below.
+    }
+
+    // 2. If online, refresh from Supabase in the background and update cache.
     if (online && configured) {
-      const sb = getSupabase();
-      if (!sb) {
-        setExistingError('Supabase not configured');
-        return;
-      }
       try {
-        const { data, error } = await sb
-          .from('emg_roadblocks')
-          .select('*')
-          .order('reported_at', { ascending: false })
-          .limit(50);
-        if (error) {
-          setExistingError(error.message);
-          return;
-        }
-        const rows = (data ?? []) as Roadblock[];
-        setExisting(rows);
+        const { syncRoadblocks, getCachedRoadblocks, getRoadblocksLastSync } =
+          await import('../lib/roadblocks');
+        await syncRoadblocks();
+        const refreshed = await getCachedRoadblocks();
+        setExisting(refreshed.slice(0, 50));
+        const ts = await getRoadblocksLastSync();
+        setLastSync(ts);
       } catch (err) {
-        setExistingError(err instanceof Error ? err.message : 'Failed to load');
+        // Network refresh failed — cached data (if any) is already shown.
+        // Only show error if we have no cached data at all.
+        setExisting((prev) => {
+          if (prev.length === 0) {
+            setExistingError(
+              err instanceof Error ? err.message : 'Failed to load'
+            );
+          }
+          return prev;
+        });
       }
-    } else {
-      setExisting([]);
-      try {
-        const items = await idbGetAll<SyncQueueItem>('syncQueue');
-        const roadblocks = Array.isArray(items)
-          ? items
-              .filter((i) => i && i.kind === 'roadblock')
-              .map((i) => i.payload)
-              .filter(
-                (p): p is Roadblock =>
-                  !!p && typeof (p as Roadblock).id === 'string'
-              )
-          : [];
-        setQueued(roadblocks);
-      } catch {
-        setQueued([]);
-      }
+    }
+
+    // Queued (unsynced) roadblocks from the sync queue.
+    try {
+      const items = await idbGetAll<SyncQueueItem>('syncQueue');
+      const roadblocks = Array.isArray(items)
+        ? items
+            .filter((i) => i && i.kind === 'roadblock')
+            .map((i) => i.payload)
+            .filter(
+              (p): p is Roadblock =>
+                !!p && typeof (p as Roadblock).id === 'string'
+            )
+        : [];
+      setQueued(roadblocks);
+    } catch {
+      setQueued([]);
     }
     // Local-only roadblock photos are available in every list view, online
     // or offline. The photo list itself is best-effort — the per-photo save
@@ -308,6 +323,14 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
       }
 
       setStatus('success');
+      // Cache the new roadblock locally so it appears on the map immediately,
+      // even before the next server sync.
+      try {
+        const { cacheRoadblock } = await import('../lib/roadblocks');
+        await cacheRoadblock(roadblock);
+      } catch {
+        // Non-fatal: loadExisting() below will refresh from whatever cache exists.
+      }
       void loadExisting();
     } catch (err) {
       setSubmitError(err instanceof Error ? err.message : 'Submit failed');
@@ -340,6 +363,17 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
         setExisting((prev) =>
           prev.map((r) => (r.id === rb.id ? { ...r, status: 'reopened' } : r))
         );
+        // Update the local cache so the map reflects the reopen offline.
+        try {
+          const { cacheRoadblock } = await import('../lib/roadblocks');
+          await cacheRoadblock({
+            ...rb,
+            status: 'reopened',
+            reopened_at: new Date().toISOString(),
+          });
+        } catch {
+          // Non-fatal: cache will refresh on next sync.
+        }
       } catch (err) {
         setSubmitError(err instanceof Error ? err.message : 'Reopen failed');
       }
@@ -473,14 +507,24 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
 
       <div className="card">
         <h3>Existing roadblocks</h3>
-        {online && configured ? (
-          existingError ? (
-            <div className="warn-box">{existingError}</div>
-          ) : existing.length === 0 ? (
-            <p className="muted">No roadblocks reported.</p>
-          ) : (
-            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-              {existing.map((rb) => {
+        {lastSync ? (
+          <p className="muted" style={{ fontSize: 12, marginTop: -8 }}>
+            Last updated:{' '}
+            {new Date(lastSync).toLocaleString()}
+            {!online ? ' (offline — showing cached)' : ''}
+          </p>
+        ) : !online ? (
+          <p className="muted" style={{ fontSize: 12, marginTop: -8 }}>
+            Offline — showing cached roadblocks
+          </p>
+        ) : null}
+        {existingError ? (
+          <div className="warn-box">{existingError}</div>
+        ) : existing.length === 0 ? (
+          <p className="muted">No roadblocks reported.</p>
+        ) : (
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {existing.map((rb) => {
                 const active = rb.status === 'active';
                 const stale = isStaleActive(rb);
                 const expanded = expandedId === rb.id;
@@ -532,12 +576,12 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
                 );
               })}
             </ul>
-          )
-        ) : queued.length === 0 ? (
-          <p className="muted">offline — no queued reports</p>
-        ) : (
-          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
-            {queued.map((rb) => (
+          )}
+        {queued.length > 0 ? (
+          <>
+            <h4 style={{ marginTop: 16 }}>Pending sync</h4>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              {queued.map((rb) => (
               <li
                 key={rb.id}
                 style={{ borderBottom: '1px solid #eee', padding: '8px 0' }}
@@ -557,9 +601,10 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
                   />
                 ) : null}
               </li>
-            ))}
-          </ul>
-        )}
+              ))}
+            </ul>
+          </>
+        ) : null}
       </div>
 
       <div className="card">
