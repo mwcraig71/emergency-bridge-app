@@ -198,6 +198,7 @@ function ProgressDots({ step }: { step: Step }) {
   const total = STEP_ORDER.length;
   return (
     <div className="field" style={{ marginBottom: 4 }}>
+      <div className="eyebrow">Inspection progress</div>
       <div className="field-label">Step {active + 1} of {total}</div>
       <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
         {STEP_ORDER.map((s, i) => (
@@ -205,10 +206,10 @@ function ProgressDots({ step }: { step: Step }) {
             key={s}
             aria-hidden="true"
             style={{
-              width: 8,
-              height: 8,
-              borderRadius: 999,
-              background: i <= active ? '#1f2937' : '#d1d5db',
+              width: 24,
+              height: 6,
+              borderRadius: 2,
+              background: i <= active ? '#CF3910' : '#DDDDDD',
             }}
           />
         ))}
