@@ -64,6 +64,20 @@ function isStaleActive(rb: Roadblock): boolean {
   return Date.now() - t > 12 * 60 * 60 * 1000;
 }
 
+/** UUID with a Math.random fallback — crypto.randomUUID() throws in
+ *  non-secure contexts, and a throw there must never leave the submit
+ *  button stuck on "Submitting…". */
+function newReportId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID();
+    }
+  } catch {
+    // fall through to the fallback below
+  }
+  return `rb-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 function formatDate(iso: string): string {
   const t = Date.parse(iso);
   if (!Number.isFinite(t)) return iso;
@@ -93,8 +107,23 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
   const [photoMap, setPhotoMap] = useState<Record<string, string>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
-  const online = useMemo(() => isOnline(), [status]);
+  // Reactive online state: recompute on browser online/offline events, not
+  // just when the submit status changes (a stale snapshot would queue when
+  // the device just came back online, or attempt a doomed direct insert).
+  const [online, setOnline] = useState<boolean>(() => isOnline());
   const configured = useMemo(() => isSupabaseConfigured(), []);
+
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on);
+    window.addEventListener('offline', off);
+    setOnline(isOnline());
+    return () => {
+      window.removeEventListener('online', on);
+      window.removeEventListener('offline', off);
+    };
+  }, []);
 
 
   const loadExisting = useCallback(async () => {
@@ -166,7 +195,14 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
       const fix = await getGpsFix();
       setGps({ lat: fix.lat, lon: fix.lon, accuracy: fix.accuracy ?? 0 });
     } catch (err) {
-      setGpsError(err instanceof Error ? err.message : 'GPS failed');
+      const code = (err as { code?: number } | null)?.code;
+      setGpsError(
+        code === 1
+          ? 'GPS permission denied. Enable location access in Settings.'
+          : err instanceof Error
+            ? err.message
+            : 'GPS failed'
+      );
     } finally {
       setGpsLoading(false);
     }
@@ -198,21 +234,24 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
     setPhotoError(null);
     setStatus('submitting');
 
-    const id = crypto.randomUUID();
-    const reported_at = new Date().toISOString();
-    const roadblock: Roadblock = {
-      id,
-      road_name: roadName.trim(),
-      closure_type: closureType,
-      status: 'active',
-      lat: gps.lat,
-      lon: gps.lon,
-      notes: notes.trim() || null,
-      reporter: inspectorName,
-      reported_at,
-    };
-
     try {
+      // ID generation lives inside the try: crypto.randomUUID() can throw in
+      // non-secure contexts, and the catch below resets status to 'idle' so
+      // the UI always reaches a terminal state.
+      const id = newReportId();
+      const reported_at = new Date().toISOString();
+      const roadblock: Roadblock = {
+        id,
+        road_name: roadName.trim(),
+        closure_type: closureType,
+        status: 'active',
+        lat: gps.lat,
+        lon: gps.lon,
+        notes: notes.trim() || null,
+        reporter: inspectorName,
+        reported_at,
+      };
+
       if (online && configured) {
         const sb = getSupabase();
         if (!sb) throw new Error('Supabase not configured');

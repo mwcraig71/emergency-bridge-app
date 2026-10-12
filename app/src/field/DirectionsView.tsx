@@ -31,6 +31,7 @@ function isAndroid(): boolean {
 export default function DirectionsView({ bridge, onClose }: Props): React.JSX.Element {
   const [fix, setFix] = useState<GpsFix | null>(null);
   const [gpsError, setGpsError] = useState<string | null>(null);
+  const [gpsDenied, setGpsDenied] = useState<boolean>(false);
   const [online, setOnline] = useState<boolean>(() => isOnline());
   const [nearbyClosures, setNearbyClosures] = useState<number | null>(null);
 
@@ -53,9 +54,18 @@ export default function DirectionsView({ bridge, onClose }: Props): React.JSX.El
         (f) => {
           setFix(f);
           setGpsError(null);
+          setGpsDenied(false);
         },
         (err) => {
-          setGpsError(err instanceof Error ? err.message : 'GPS unavailable');
+          // GeolocationPositionError code 1 = permission denied. Say so
+          // plainly instead of the misleading "waiting for fix".
+          const code = (err as { code?: number } | null)?.code;
+          if (code === 1) {
+            setGpsDenied(true);
+            setGpsError(null);
+          } else {
+            setGpsError(err instanceof Error ? err.message : 'GPS unavailable');
+          }
         }
       );
     } catch (err) {
@@ -212,12 +222,16 @@ export default function DirectionsView({ bridge, onClose }: Props): React.JSX.El
               </div>
             </div>
 
-            {!fix && gpsError ? (
+            {!fix && gpsDenied ? (
               <div className="warn-box">
-                Waiting for GPS fix… (GPS works without cell service)
+                GPS permission denied. Enable location access in Settings to
+                use live directions.
               </div>
             ) : null}
-            {!fix && !gpsError ? (
+            {!fix && !gpsDenied && gpsError ? (
+              <div className="warn-box">{gpsError}</div>
+            ) : null}
+            {!fix && !gpsDenied && !gpsError ? (
               <p className="muted" style={{ marginTop: 8 }}>
                 Waiting for GPS fix… (GPS works without cell service)
               </p>

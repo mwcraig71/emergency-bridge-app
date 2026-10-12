@@ -25,8 +25,12 @@ async function fixNative(): Promise<GpsFix> {
 
 function fixWeb(): Promise<GpsFix> {
   return new Promise((resolve, reject) => {
-    if (!('geolocation' in navigator)) {
-      return reject(new Error('Geolocation not available'));
+    if (
+      typeof navigator === 'undefined' ||
+      !('geolocation' in navigator) ||
+      !navigator.geolocation
+    ) {
+      return reject(new GpsError('Geolocation is not available in this browser', 0));
     }
     navigator.geolocation.getCurrentPosition(
       (pos) =>
@@ -36,10 +40,25 @@ function fixWeb(): Promise<GpsFix> {
           accuracy: pos.coords.accuracy,
           timestamp: pos.timestamp,
         }),
-      (err) => reject(new Error(err.message)),
+      (err) => reject(new GpsError(err.message || 'GPS unavailable', err.code)),
       { enableHighAccuracy: true, timeout: 20000 },
     );
   });
+}
+
+/**
+ * Error from GPS APIs that carries the GeolocationPositionError code
+ * (1 = permission denied, 2 = position unavailable, 3 = timeout).
+ * Callers use `code === 1` to show an "enable location access" message
+ * instead of a generic "waiting for fix".
+ */
+export class GpsError extends Error {
+  code: number;
+  constructor(message: string, code = 0) {
+    super(message);
+    this.name = 'GpsError';
+    this.code = code;
+  }
 }
 
 /** One-shot GPS fix. Rejects on timeout/denial — callers must handle gracefully. */
@@ -66,18 +85,26 @@ export function watchGps(
   let done = false;
   let watchId = '';
   let errored = false;
+  let unsubscribed = false;
 
   const handleFix = (f: GpsFix) => {
     if (!done) onFix(f);
   };
+  const handleError = (err: Error) => {
+    if (!errored) {
+      errored = true;
+      onError?.(err);
+    }
+  };
 
   if (Capacitor.isNativePlatform()) {
+    // The watch id arrives asynchronously: if unsubscribe() runs before the
+    // promise resolves, `cancelled` makes sure the id is cleared the moment
+    // it arrives instead of leaking a native watch in the background.
+    let cancelled = false;
     Geolocation.watchPosition({ enableHighAccuracy: true }, (pos, err) => {
       if (err) {
-        if (!errored) {
-          errored = true;
-          onError?.(new Error(String(err)));
-        }
+        handleError(new Error(String(err)));
         return;
       }
       if (pos) {
@@ -88,13 +115,31 @@ export function watchGps(
           timestamp: pos.timestamp,
         });
       }
-    }).then((id) => {
-      watchId = id;
-    });
+    })
+      .then((id) => {
+        watchId = id;
+        if (cancelled) void Geolocation.clearWatch({ id });
+      })
+      .catch((e) => {
+        handleError(e instanceof Error ? e : new Error(String(e)));
+      });
     return () => {
+      if (unsubscribed) return;
+      unsubscribed = true;
       done = true;
+      cancelled = true;
       if (watchId) void Geolocation.clearWatch({ id: watchId });
     };
+  }
+
+  // Web path: navigator.geolocation is absent in non-secure contexts and
+  // some embedded browsers — guard instead of throwing an obscure TypeError.
+  if (
+    typeof navigator === 'undefined' ||
+    !('geolocation' in navigator) ||
+    !navigator.geolocation
+  ) {
+    throw new GpsError('Geolocation is not available in this browser', 0);
   }
 
   const id = navigator.geolocation.watchPosition(
@@ -106,14 +151,13 @@ export function watchGps(
         timestamp: pos.timestamp,
       }),
     (err) => {
-      if (!errored) {
-        errored = true;
-        onError?.(new Error(err.message));
-      }
+      handleError(new GpsError(err.message || 'GPS unavailable', err.code));
     },
     { enableHighAccuracy: true },
   );
   return () => {
+    if (unsubscribed) return;
+    unsubscribed = true;
     done = true;
     navigator.geolocation.clearWatch(id);
   };
