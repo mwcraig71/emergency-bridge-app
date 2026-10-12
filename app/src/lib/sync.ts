@@ -2,6 +2,7 @@
 // Server merge rule: dedupe by client_inspection_id + timestamp, newest wins.
 import { getSupabase, isSupabaseConfigured, isOnline } from './supabase';
 import { idbGetAll, idbPut, idbDelete } from './idb';
+import { getCurrentFirmId } from './firm';
 import type { InspectionDraft, Roadblock, SyncQueueItem, PhotoRef } from '../types';
 
 function uuid(): string {
@@ -93,6 +94,7 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
         coord_mismatch: d.coord_mismatch,
         sync_status: 'synced',
         client_inspection_id: d.client_inspection_id,
+        firm_id: d.firm_id ?? getCurrentFirmId(),
       };
       // Newest-wins upsert on the client dedupe key.
       const { error } = await sb
@@ -232,6 +234,7 @@ async function markAssignmentComplete(
       title: `Bridge ${assetId} inspected`,
       message: `${inspectorName} inspected your assigned bridge ${assetId}.`,
       related_asset_id: assetId,
+      firm_id: getCurrentFirmId(),
     });
     if (notifError) throw new Error(notifError.message);
   }
