@@ -3,14 +3,15 @@
 // so the field app can warn on cross-assignment inspections offline.
 import { getSupabase, isOnline, isSupabaseConfigured } from './supabase';
 import { idbBulkPut, idbGetAll, idbPut } from './idb';
+import { getCurrentFirmId, withFirmFilter } from './firm';
 import type { AppNotification, Assignment } from '../types';
 
 const ASSIGNMENT_SELECT =
   'id,asset_id,assigned_to,assigned_by,assigned_at,status,' +
-  'completed_by,completed_at,notes,created_at';
+  'completed_by,completed_at,notes,created_at,firm_id';
 
 const NOTIFICATION_SELECT =
-  'id,recipient,type,title,message,related_asset_id,created_at,read_at';
+  'id,recipient,type,title,message,related_asset_id,created_at,read_at,firm_id';
 
 function rowToAssignment(r: Record<string, unknown>): Assignment {
   return {
@@ -24,6 +25,7 @@ function rowToAssignment(r: Record<string, unknown>): Assignment {
     completed_at: (r.completed_at as string) ?? null,
     notes: (r.notes as string) ?? null,
     created_at: String(r.created_at ?? ''),
+    firm_id: (r.firm_id as string) ?? null,
   };
 }
 
@@ -37,6 +39,7 @@ function rowToNotification(r: Record<string, unknown>): AppNotification {
     related_asset_id: (r.related_asset_id as string) ?? null,
     created_at: String(r.created_at ?? ''),
     read_at: (r.read_at as string) ?? null,
+    firm_id: (r.firm_id as string) ?? null,
   };
 }
 
@@ -48,10 +51,9 @@ function rowToNotification(r: Record<string, unknown>): AppNotification {
 export async function syncAssignments(): Promise<number> {
   const sb = getSupabase();
   if (!sb) throw new Error('Supabase is not configured');
-  const { data, error } = await sb
-    .from('emg_assignments')
-    .select(ASSIGNMENT_SELECT)
-    .order('assigned_at', { ascending: false });
+  const { data, error } = await withFirmFilter(
+    sb.from('emg_assignments').select(ASSIGNMENT_SELECT),
+  ).order('assigned_at', { ascending: false });
   if (error) throw error;
   const seen = new Set<string>();
   const rows: Assignment[] = [];
@@ -91,14 +93,18 @@ export async function syncNotifications(
   return rows.length;
 }
 
-/** Assignments for one inspector, active (non-complete) first. */
+/** Assignments for one inspector, active (non-complete) first.
+ *  When a firm is active, only that firm's assignments are returned. */
 export async function getMyAssignments(
   inspectorName: string,
 ): Promise<Assignment[]> {
   const all = await idbGetAll<Assignment>('assignments');
   const name = inspectorName.trim().toLowerCase();
+  const firmId = getCurrentFirmId();
   const mine = all.filter(
-    (a) => a.assigned_to.trim().toLowerCase() === name,
+    (a) =>
+      a.assigned_to.trim().toLowerCase() === name &&
+      (firmId == null || a.firm_id === firmId),
   );
   const rank = (s: Assignment['status']) =>
     s === 'assigned' ? 0 : s === 'in_progress' ? 1 : 2;
@@ -171,6 +177,7 @@ export async function assignToSelf(
   const name = inspectorName.trim();
   if (!name) return;
   const now = new Date().toISOString();
+  const firmId = getCurrentFirmId();
   const local: Assignment = {
     id: `local-${assetId}`,
     asset_id: assetId,
@@ -182,6 +189,7 @@ export async function assignToSelf(
     completed_at: null,
     notes: null,
     created_at: now,
+    firm_id: firmId,
   };
   await idbPut('assignments', local);
   if (!isOnline() || !isSupabaseConfigured()) return;
@@ -194,6 +202,7 @@ export async function assignToSelf(
         assigned_to: name,
         assigned_by: name,
         status: 'assigned',
+        firm_id: firmId,
       })
       .select('id')
       .single();
