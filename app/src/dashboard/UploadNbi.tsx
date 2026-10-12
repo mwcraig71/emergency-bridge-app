@@ -118,7 +118,7 @@ function PreviewMap({ bbox, points }: { bbox: [number, number, number, number] |
       });
       map.addLayer({
         id: 'bbox-line', type: 'line', source: 'bbox',
-        paint: { 'line-color': '#38bdf8', 'line-width': 2 },
+        paint: { 'line-color': '#CF3910', 'line-width': 2 },
       });
       const pts = points.slice(0, 300).map((p) => ({
         type: 'Feature' as const,
@@ -313,7 +313,7 @@ export default function UploadNbi(): React.JSX.Element {
             }}
             onClick={() => fileRef.current?.click()}
             style={{
-              border: `2px dashed ${dragOver ? '#38bdf8' : '#475569'}`,
+              border: `2px dashed ${dragOver ? '#CF3910' : '#9A9A9A'}`,
               borderRadius: 10,
               padding: 36,
               textAlign: 'center',
@@ -352,7 +352,7 @@ export default function UploadNbi(): React.JSX.Element {
             Format: <code>{preview.format}</code>{' '}
             {!preview.layout_verified && (
               <span style={{ color: '#fbbf24' }}>
-                ⚠ unverified fixed-width layout — check the sample rows carefully before importing
+                Check: unverified fixed-width layout — check the sample rows carefully before importing
               </span>
             )}
           </p>
@@ -409,13 +409,13 @@ export default function UploadNbi(): React.JSX.Element {
           <h3>Collision check</h3>
           {check.collision_count === 0 && check.within_batch_duplicates === 0 ? (
             <p style={{ color: '#86efac' }}>
-              ✓ No collisions — {preview!.loadable.toLocaleString()} IDs are clear against{' '}
+              No collisions — {preview!.loadable.toLocaleString()} IDs are clear against{' '}
               {check.existing_count.toLocaleString()} existing bridges. Safe to import.
             </p>
           ) : (
             <div>
               <p style={{ color: '#fca5a5' }}>
-                ✗ Blocked: {check.collision_count} collisions with existing bridges
+                Blocked: {check.collision_count} collisions with existing bridges
                 {check.within_batch_duplicates > 0 &&
                   `, ${check.within_batch_duplicates} duplicates within the file`}.
                 Nothing was written.
@@ -439,7 +439,7 @@ export default function UploadNbi(): React.JSX.Element {
       {(step === 'importing' || step === 'done') && job && (
         <div style={{ marginTop: 12 }}>
           <h3>Import {job.status === 'running' ? 'in progress…' : job.status}</h3>
-          <div style={{ background: '#0f172a', borderRadius: 6, height: 18, overflow: 'hidden' }}>
+          <div style={{ background: '#DDDDDD', borderRadius: 2, height: 18, overflow: 'hidden' }}>
             <div
               style={{
                 width: `${pct}%`, height: '100%',
@@ -454,7 +454,7 @@ export default function UploadNbi(): React.JSX.Element {
           </p>
           {job.status === 'completed' && (
             <p style={{ color: '#86efac' }}>
-              ✓ Import complete: {job.loaded.toLocaleString()} bridges loaded
+              Import complete: {job.loaded.toLocaleString()} bridges loaded
               ({job.skipped.toLocaleString()} skipped for bad coordinates).
             </p>
           )}
