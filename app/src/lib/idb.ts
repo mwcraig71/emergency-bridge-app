@@ -3,7 +3,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'emergency-bridge-app';
-const DB_VERSION = 7;
+const DB_VERSION = 8;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -11,7 +11,7 @@ function db(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
       upgrade(d) {
-        // contains() guards make this safe for fresh installs (v0→v6)
+        // contains() guards make this safe for fresh installs (v0→v8)
         // and upgrades (any version → latest): each store is created only
         // if it doesn't already exist.
         if (!d.objectStoreNames.contains('bridges'))
@@ -56,6 +56,11 @@ function db(): Promise<IDBPDatabase> {
         // so closure pins are visible without network.
         if (!d.objectStoreNames.contains('roadblocks'))
           d.createObjectStore('roadblocks', { keyPath: 'id' });
+        // v8: GPS track recording (onX breadcrumbs). Completed tracks are
+        // stored here keyed by track id; the in-progress track lives under
+        // the 'active_track' key in the meta store (crash-safe).
+        if (!d.objectStoreNames.contains('tracks'))
+          d.createObjectStore('tracks', { keyPath: 'id' });
       },
     });
   }

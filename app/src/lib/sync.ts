@@ -187,6 +187,7 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
     case 'road_status': {
       // Update the status of an existing roadblock (e.g. mark reopened).
       // Payload: { id: string; status: 'active' | 'reopened'; reopened_at?: string; reopened_by?: string }
+      // Payload: { id: string; status: 'active' | 'reopened'; reopened_at?: string; reopened_by?: string }
       const s = item.payload as {
         id: string;
         status: 'active' | 'reopened';
@@ -218,6 +219,49 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
       } catch {
         // Non-fatal: cache will refresh on next syncRoadblocks().
       }
+      break;
+    }
+    case 'track': {
+      // GPS breadcrumb track (onX model). Payload is a PathTrack:
+      // { id, inspector, geojson (LineString), started_at, ended_at }.
+      // Upserted by id so retries are idempotent. The table stores a
+      // PostGIS geom; we write WKT and read back the generated geojson.
+      const t = item.payload as {
+        id: string;
+        inspector: string;
+        geojson: { type: string; coordinates: Array<[number, number]> };
+        started_at: string;
+        ended_at: string | null;
+      };
+      if (!t.id || !t.inspector || !t.geojson?.coordinates?.length) {
+        throw new Error('track payload is missing id/inspector/coordinates');
+      }
+      const wkt =
+        'SRID=4326;LINESTRING(' +
+        t.geojson.coordinates.map((c) => `${c[0]} ${c[1]}`).join(',') +
+        ')';
+      // Insert-only (no UPDATE policy on this table): skip if already synced.
+      const { data: existingTrack } = await sb
+        .from('emg_path_tracks')
+        .select('id')
+        .eq('id', t.id)
+        .maybeSingle();
+      if (!existingTrack) {
+        const { error: trackError } = await sb.from('emg_path_tracks').insert({
+          id: t.id,
+          inspector: t.inspector,
+          geom: wkt,
+          started_at: t.started_at,
+          ended_at: t.ended_at,
+        });
+        if (trackError) throw new Error(trackError.message);
+      }
+      break;
+    }
+    case 'position': {
+      // Live team position ping (not yet implemented server-side).
+      // Kept as a no-op that drops the item so the queue doesn't clog;
+      // a future emg_team_positions writer can replace this.
       break;
     }
     default:

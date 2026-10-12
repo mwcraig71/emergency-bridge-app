@@ -31,6 +31,16 @@ import {
   inspectionsToCsv,
   downloadFile,
 } from '../lib/export';
+import {
+  startTracking,
+  stopTracking,
+  pauseTracking,
+  resumeTracking,
+  isTracking,
+  isPaused,
+  getActiveTrackElapsed,
+  getActiveTrackDistance,
+} from '../lib/track';
 
 type Tab = 'inspect' | 'map' | 'closure' | 'sync';
 
@@ -62,6 +72,70 @@ const FieldApp: React.FC = () => {
     bridge: Bridge;
     assignedTo: string;
   } | null>(null);
+  // GPS track recording (onX breadcrumbs)
+  const [trackActive, setTrackActive] = useState(false);
+  const [trackPaused, setTrackPaused] = useState(false);
+  const [trackElapsed, setTrackElapsed] = useState('');
+  const [trackDistance, setTrackDistance] = useState('');
+
+  // Auto-start GPS track recording once the inspector name is known.
+  useEffect(() => {
+    if (!nameLoaded || !inspectorName.trim()) return;
+    let cancelled = false;
+    void startTracking(inspectorName.trim()).then(() => {
+      if (!cancelled) {
+        setTrackActive(isTracking());
+        setTrackPaused(isPaused());
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [nameLoaded, inspectorName]);
+
+  // Live elapsed-time / distance readout for the recording pill.
+  useEffect(() => {
+    if (!trackActive) return;
+    const fmtElapsed = (ms: number): string => {
+      const s = Math.floor(ms / 1000);
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      return h > 0 ? `${h}h ${m}m` : `${m}m`;
+    };
+    const fmtDist = (m: number): string =>
+      m >= 1000 ? `${(m / 1000).toFixed(1)} km` : `${Math.round(m)} m`;
+    let cancelled = false;
+    const tick = async () => {
+      try {
+        const [ms, dist] = await Promise.all([
+          getActiveTrackElapsed(),
+          getActiveTrackDistance(),
+        ]);
+        if (!cancelled) {
+          setTrackElapsed(fmtElapsed(ms));
+          setTrackDistance(fmtDist(dist));
+        }
+      } catch {
+        // ignore
+      }
+    };
+    void tick();
+    const id = window.setInterval(tick, 30_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(id);
+    };
+  }, [trackActive]);
+
+  const handleToggleTrackPause = useCallback(() => {
+    if (isPaused()) {
+      resumeTracking();
+      setTrackPaused(false);
+    } else {
+      pauseTracking();
+      setTrackPaused(true);
+    }
+  }, []);
 
   const refreshDrafts = useCallback(async () => {
     try {
@@ -998,8 +1072,47 @@ const FieldApp: React.FC = () => {
         </div>
       )}
 
-      <nav className="field-tabbar" aria-label="Field app sections">
-        {(
+      {/* GPS track recording indicator (onX breadcrumbs) */}
+      {trackActive && (
+        <button
+          type="button"
+          onClick={handleToggleTrackPause}
+          aria-label={trackPaused ? 'Resume track recording' : 'Pause track recording'}
+          style={{
+            position: 'fixed',
+            left: 12,
+            bottom: 92,
+            zIndex: 60,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
+            background: '#001A52',
+            color: '#fff',
+            border: 'none',
+            borderRadius: 20,
+            padding: '8px 14px',
+            fontSize: 13,
+            fontWeight: 600,
+            boxShadow: '0 2px 8px rgba(0,0,0,0.3)',
+            minHeight: 40,
+          }}
+        >
+          <span
+            style={{
+              width: 10,
+              height: 10,
+              borderRadius: '50%',
+              background: trackPaused ? '#C9A227' : '#CF3910',
+              flexShrink: 0,
+            }}
+          />
+          <span>{trackPaused ? 'Paused' : 'Recording'}</span>
+          {trackElapsed && <span style={{ opacity: 0.8 }}>{trackElapsed}</span>}
+          {trackDistance && <span style={{ opacity: 0.8 }}>{trackDistance}</span>}
+        </button>
+      )}
+
+      <nav className="field-tabbar" aria-label="Field app sections">        {(
           [
             ['inspect', 'Inspect', 'clipboard'],
             ['map', 'Map', 'map'],

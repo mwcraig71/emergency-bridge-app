@@ -979,15 +979,56 @@ export default function TeamMap({
         // ignore
       }
 
-      // Path tracks
+      // Path tracks: server tracks + local (unsynced) tracks from this
+      // device, so breadcrumbs are visible immediately and offline.
       try {
         const { data } = await supabase
           .from('emg_path_tracks')
           .select('id,inspector,geojson')
           .limit(1000);
-        if (!cancelled && Array.isArray(data)) {
-          store.paths = data as unknown as PathTrack[];
+        const serverPaths = (
+          !cancelled && Array.isArray(data) ? data : []
+        ) as unknown as PathTrack[];
+        // Merge local tracks (dedupe by id — server wins on conflict).
+        let localPaths: PathTrack[] = [];
+        try {
+          const { idbGetAll } = await import('../lib/idb');
+          localPaths = await idbGetAll<PathTrack>('tracks');
+        } catch {
+          // ignore — IndexedDB may be unavailable
         }
+        const seen = new Set(serverPaths.map((p) => p.id));
+        const merged = [...serverPaths];
+        for (const p of localPaths) {
+          if (p && p.id && !seen.has(p.id)) {
+            merged.push(p);
+            seen.add(p.id);
+          }
+        }
+        // Include the in-progress track so the live breadcrumb trail shows.
+        try {
+          const { idbGet } = await import('../lib/idb');
+          const rec = await idbGet<{ key: string; value: {
+            id: string; inspector: string; started_at: string;
+            points: Array<{ lat: number; lon: number }>;
+          } }>('meta', 'active_track');
+          const a = rec?.value;
+          if (a && a.id && !seen.has(a.id) && a.points.length >= 2) {
+            merged.push({
+              id: a.id,
+              inspector: a.inspector,
+              geojson: {
+                type: 'LineString',
+                coordinates: a.points.map((pt) => [pt.lon, pt.lat]),
+              } as GeoJSON.LineString,
+              started_at: a.started_at,
+              ended_at: null,
+            });
+          }
+        } catch {
+          // ignore
+        }
+        if (!cancelled) store.paths = merged;
       } catch {
         // ignore
       }
