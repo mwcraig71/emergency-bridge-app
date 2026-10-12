@@ -14,14 +14,23 @@ function EnvNav() {
       : 'field';
   return (
     <nav className="env-nav">
-      <Link to="/" className={active === 'field' ? 'active' : ''}>
+      <span className="brandmark" aria-label="Strinteg">
+        <span className="str">STR</span>INTEG
+      </span>
+      <Link to="/" className={`env-link${active === 'field' ? ' active' : ''}`}>
         Field app
       </Link>
-      <Link to="/dashboard" className={active === 'firm' ? 'active' : ''}>
-        Operations dashboard
+      <Link
+        to="/dashboard"
+        className={`env-link${active === 'firm' ? ' active' : ''}`}
+      >
+        Firm ops
       </Link>
-      <Link to="/statedashboard" className={active === 'state' ? 'active' : ''}>
-        State dashboard
+      <Link
+        to="/statedashboard"
+        className={`env-link${active === 'state' ? ' active' : ''}`}
+      >
+        State ops
       </Link>
     </nav>
   );
