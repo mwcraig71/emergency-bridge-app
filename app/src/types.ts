@@ -122,6 +122,8 @@ export interface InspectionDraft {
   photos: PhotoRef[];
   sync_status: 'pending' | 'synced' | 'conflict';
   updated_at: string;
+  /** Owning firm (multi-tenancy). Null = pre-firm legacy / no firm selected. */
+  firm_id?: string | null;
 }
 
 export interface Roadblock {
@@ -199,6 +201,8 @@ export interface Assignment {
   completed_at: string | null;
   notes: string | null;
   created_at: string;
+  /** Owning firm (multi-tenancy). Null = pre-firm legacy / no firm selected. */
+  firm_id?: string | null;
 }
 
 /** Inspector notification (emg_notifications). */
@@ -211,6 +215,34 @@ export interface AppNotification {
   related_asset_id: string | null;
   created_at: string;
   read_at: string | null;
+  /** Owning firm (multi-tenancy). Null = pre-firm legacy / no firm selected. */
+  firm_id?: string | null;
+}
+
+/** Firm (tenant). Firms receive groups of bridges and assign them to
+ *  inspector teams within the firm. */
+export interface Firm {
+  id: string;
+  name: string;
+  created_at: string;
+}
+
+/** Inspector roster entry for a firm (inspectors table).
+ *  pin_hash is never exposed to clients — roster syncs select explicit
+ *  columns only (see lib/firm.ts). */
+export interface Inspector {
+  id: string;
+  firm_id: string;
+  name: string;
+  created_at: string;
+}
+
+/** Bridge-to-firm membership (firm_bridges mapping table). Bridges are
+ *  shared NBI data; firm ownership is a mapping, not a column. */
+export interface FirmBridge {
+  firm_id: string;
+  asset_id: string;
+  assigned_at: string;
 }
 
 /** Named bucket of bridges for bulk assignment (IndexedDB `buckets` store). */
