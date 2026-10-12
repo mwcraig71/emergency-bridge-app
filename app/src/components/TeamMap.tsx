@@ -38,6 +38,18 @@ interface TeamMapProps {
   assignedAssetIds?: string[];
   /** Field-app callback for the info sheet "Add to my list" button. */
   onAssignToSelf?: (bridge: Bridge) => void;
+  /**
+   * State dashboard: color bridge dots by owning firm instead of inspection
+   * status. Requires firmColorByAsset. Defaults to 'status'.
+   */
+  colorBy?: 'status' | 'firm';
+  /** asset_id -> CSS color, used when colorBy === 'firm'. */
+  firmColorByAsset?: Record<string, string>;
+  /**
+   * State dashboard: render only these bridges (e.g. after applying the
+   * firm/county/status filters). Null/undefined = no filter.
+   */
+  filterAssetIds?: string[] | null;
   position?: { lon: number; lat: number } | null;
   height?: string;
   onBridgeClick?: (assetId: string) => void;
@@ -207,12 +219,21 @@ type BridgeMode = 'normal' | 'mine' | 'bg';
  * - showAll == false: only assigned bridges render, each `mine` (highlighted).
  * - showAll == true: assigned bridges render `mine`, everything else `bg`
  *   (dimmed background data the inspector can tap to add to their list).
+ * - opts.visible: when provided, bridges outside the set are skipped entirely
+ *   (state dashboard filters).
+ * - opts.colorBy === 'firm': dot color comes from opts.firmColorByAsset
+ *   (state dashboard firm coloring); unassigned bridges render gray.
  */
 function buildBridgeFeatures(
   bridges: Bridge[],
   triageByAsset: Map<string, string>,
   assigned: Set<string> | null,
   showAll: boolean,
+  opts?: {
+    colorBy?: 'status' | 'firm';
+    firmColorByAsset?: Record<string, string>;
+    visible?: Set<string> | null;
+  },
 ): GeoJSON.Feature[] {
   const out: GeoJSON.Feature[] = [];
   for (const b of bridges) {
@@ -224,6 +245,7 @@ function buildBridgeFeatures(
     ) {
       continue;
     }
+    if (opts?.visible && !opts.visible.has(b.asset_id)) continue;
     let mode: BridgeMode = 'normal';
     if (assigned) {
       const isMine = assigned.has(b.asset_id);
@@ -231,6 +253,10 @@ function buildBridgeFeatures(
       mode = isMine ? 'mine' : 'bg';
     }
     const triage = triageByAsset.get(b.asset_id);
+    let color = statusColor(triage);
+    if (opts?.colorBy === 'firm') {
+      color = opts.firmColorByAsset?.[b.asset_id] ?? '#64748b';
+    }
     out.push({
       type: 'Feature' as const,
       geometry: {
@@ -240,7 +266,7 @@ function buildBridgeFeatures(
       properties: {
         asset_id: b.asset_id,
         label: shortAssetId(b.asset_id),
-        color: statusColor(triage),
+        color,
         mode,
       },
     });
@@ -255,6 +281,9 @@ export default function TeamMap({
   showOfflineDownload = false,
   assignedAssetIds,
   onAssignToSelf,
+  colorBy,
+  firmColorByAsset,
+  filterAssetIds,
   position = null,
   height = '60dvh',
   onBridgeClick,
@@ -286,6 +315,17 @@ export default function TeamMap({
   useEffect(() => {
     showAllRef.current = showAllBridges;
   }, [showAllBridges]);
+  // State dashboard firm coloring / filtering refs (same pattern).
+  const colorByRef = useRef<'status' | 'firm'>('status');
+  colorByRef.current = colorBy ?? 'status';
+  const firmColorRef = useRef<Record<string, string>>({});
+  firmColorRef.current = firmColorByAsset ?? {};
+  const filterSet = useMemo(
+    () => (filterAssetIds ? new Set(filterAssetIds) : null),
+    [filterAssetIds],
+  );
+  const filterRef = useRef<Set<string> | null>(null);
+  filterRef.current = filterSet;
   // Offline tile download state
   const [dlOpen, setDlOpen] = useState(false);
   const [dlBounds, setDlBounds] = useState<TileBounds | null>(null);
@@ -963,6 +1003,11 @@ export default function TeamMap({
         store.triageByAsset,
         assignedIdsRef.current,
         showAllRef.current,
+        {
+          colorBy: colorByRef.current,
+          firmColorByAsset: firmColorRef.current,
+          visible: filterRef.current,
+        },
       );
       const bSrc = map.getSource('bridges') as
         | maplibregl.GeoJSONSource
@@ -1156,9 +1201,14 @@ export default function TeamMap({
         store.triageByAsset,
         assignedIdsRef.current,
         showAllRef.current,
+        {
+          colorBy: colorByRef.current,
+          firmColorByAsset: firmColorRef.current,
+          visible: filterRef.current,
+        },
       ),
     });
-  }, [ready, showAllBridges, assignedAssetIds]);
+  }, [ready, showAllBridges, assignedAssetIds, colorBy, firmColorByAsset, filterAssetIds]);
 
   // Focus bridge marker + route
   useEffect(() => {
