@@ -3,7 +3,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'emergency-bridge-app';
-const DB_VERSION = 4;
+const DB_VERSION = 5;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -38,6 +38,11 @@ function db(): Promise<IDBPDatabase> {
           d.createObjectStore('offlineTiles', { keyPath: 'key' });
         if (!d.objectStoreNames.contains('offlineAreas'))
           d.createObjectStore('offlineAreas', { keyPath: 'id' });
+        // v5: firm multi-tenancy — firms + inspector roster (offline PIN login)
+        if (!d.objectStoreNames.contains('firms'))
+          d.createObjectStore('firms', { keyPath: 'id' });
+        if (!d.objectStoreNames.contains('inspectors'))
+          d.createObjectStore('inspectors', { keyPath: 'id' });
       },
     });
   }
