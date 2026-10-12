@@ -5,6 +5,7 @@ import type { Bridge, Roadblock, RoadStatusPin, PathTrack, TeamPosition } from '
 import { createTilePackProvider } from '../lib/tilepacks';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import { idbGetAll } from '../lib/idb';
+import Icon from './Icon';
 import {
   OFFLINE_PROTOCOL,
   getTileBounds,
@@ -101,7 +102,7 @@ function statusColor(status: string | undefined | null): string {
     case 'complete':
       return '#16a34a';
     default:
-      return '#94a3b8';
+      return '#B9C6E8';
   }
 }
 
@@ -628,7 +629,7 @@ export default function TeamMap({
             'text-padding': 2,
           },
           paint: {
-            'text-color': '#e2e8f0',
+            'text-color': '#FFFFFF',
             'text-halo-color': '#0b1220',
             'text-halo-width': 1.5,
             'text-opacity': ['match', ['get', 'mode'], 'bg', 0.4, 1],
@@ -1162,7 +1163,7 @@ export default function TeamMap({
                   pending_count: t.pending_count ?? '',
                   updated_at: t.updated_at ?? '',
                   initial,
-                  color: stale ? '#94a3b8' : '#0ea5e9',
+                  color: stale ? '#B9C6E8' : '#0ea5e9',
                 },
               };
             })
@@ -1342,18 +1343,8 @@ export default function TeamMap({
             type="button"
             onClick={() => setShowAllBridges((v) => !v)}
             aria-pressed={showAllBridges}
-            style={{
-              background: showAllBridges
-                ? 'rgba(15,23,42,0.85)'
-                : 'rgba(250,204,21,0.92)',
-              color: showAllBridges ? '#e2e8f0' : '#0f172a',
-              border: '1px solid #334155',
-              borderRadius: 6,
-              padding: '8px 12px',
-              fontSize: 13,
-              fontWeight: 700,
-              cursor: 'pointer',
-            }}
+            className={`map-ctrl${showAllBridges ? '' : ' active'}`}
+            style={{ fontWeight: 700 }}
           >
             {showAllBridges
               ? `My bridges (${assignedAssetIds?.length ?? 0})`
@@ -1369,10 +1360,10 @@ export default function TeamMap({
           top: 8,
           right: 8,
           zIndex: 5,
-          background: 'rgba(15,23,42,0.85)',
-          color: '#e2e8f0',
+          background: 'rgba(0,26,82,0.92)',
+          color: '#FFFFFF',
           padding: '4px 6px',
-          borderRadius: 6,
+          borderRadius: 2,
           fontSize: 12,
         }}
       >
@@ -1389,7 +1380,7 @@ export default function TeamMap({
           style={{
             background: 'transparent',
             color: 'inherit',
-            border: '1px solid #334155',
+            border: '1px solid #3D5B96',
             borderRadius: 4,
             padding: '2px 4px',
           }}
@@ -1416,31 +1407,16 @@ export default function TeamMap({
           <button
             type="button"
             onClick={openDownloadDialog}
-            style={{
-              background: 'rgba(15,23,42,0.85)',
-              color: '#e2e8f0',
-              border: '1px solid #334155',
-              borderRadius: 6,
-              padding: '8px 12px',
-              fontSize: 13,
-              fontWeight: 600,
-              cursor: 'pointer',
-            }}
+            className="map-ctrl primary"
           >
-            ⬇ Offline map
+            <Icon name="download" size={14} />
+            Offline map
           </button>
           <button
             type="button"
             onClick={() => setManageOpen(true)}
-            style={{
-              background: 'rgba(15,23,42,0.85)',
-              color: '#94a3b8',
-              border: '1px solid #334155',
-              borderRadius: 6,
-              padding: '6px 12px',
-              fontSize: 12,
-              cursor: 'pointer',
-            }}
+            className="map-ctrl"
+            style={{ fontSize: 12 }}
           >
             Manage
           </button>
@@ -1454,10 +1430,10 @@ export default function TeamMap({
           bottom: 8,
           left: 8,
           zIndex: 5,
-          background: 'rgba(15,23,42,0.85)',
-          color: '#e2e8f0',
+          background: 'rgba(0,26,82,0.92)',
+          color: '#FFFFFF',
           padding: '6px 10px',
-          borderRadius: 6,
+          borderRadius: 2,
           fontSize: 11,
           lineHeight: 1.5,
           pointerEvents: 'none',
@@ -1470,7 +1446,7 @@ export default function TeamMap({
           ['#eab308', 'Revisit / partial'],
           ['#3b82f6', 'Ground follow-up / GPS'],
           ['#16a34a', 'Complete / passable'],
-          ['#94a3b8', 'Not started'],
+          ['#B9C6E8', 'Not started'],
           ['#dc2626', 'Roadblock (active)'],
           ['#0ea5e9', 'Team active'],
         ].map(([c, label]) => (
@@ -1501,7 +1477,7 @@ export default function TeamMap({
             background: 'rgba(153,27,27,0.9)',
             color: '#fee2e2',
             padding: '6px 10px',
-            borderRadius: 6,
+            borderRadius: 2,
             fontSize: 12,
             maxWidth: 260,
           }}
@@ -1546,7 +1522,7 @@ export default function TeamMap({
                 maxHeight: '55%',
                 overflowY: 'auto',
                 background: '#0f172a',
-                color: '#e2e8f0',
+                color: '#FFFFFF',
                 borderTopLeftRadius: 16,
                 borderTopRightRadius: 16,
                 padding: '8px 16px calc(12px + env(safe-area-inset-bottom))',
@@ -1559,7 +1535,7 @@ export default function TeamMap({
                   width: 40,
                   height: 4,
                   borderRadius: 2,
-                  background: '#334155',
+                  background: '#3D5B96',
                   margin: '4px auto 10px',
                 }}
               />
@@ -1575,12 +1551,12 @@ export default function TeamMap({
                   <div style={{ fontSize: 18, fontWeight: 700 }}>
                     {selected.asset_id}
                   </div>
-                  <div style={{ fontSize: 13, color: '#94a3b8', marginTop: 2 }}>
+                  <div style={{ fontSize: 13, color: '#B9C6E8', marginTop: 2 }}>
                     {[selected.facility, selected.feature]
                       .filter(Boolean)
                       .join(' over ') || '—'}
                   </div>
-                  <div style={{ fontSize: 13, color: '#94a3b8' }}>
+                  <div style={{ fontSize: 13, color: '#B9C6E8' }}>
                     {selected.county_name ?? selected.county ?? '—'}
                     {selected.yr_built ? ` · Built ${selected.yr_built}` : ''}
                   </div>
@@ -1592,8 +1568,8 @@ export default function TeamMap({
                   style={{
                     flex: '0 0 auto',
                     background: 'transparent',
-                    border: '1px solid #334155',
-                    color: '#e2e8f0',
+                    border: '1px solid #3D5B96',
+                    color: '#FFFFFF',
                     borderRadius: 8,
                     width: 36,
                     height: 36,
@@ -1630,7 +1606,7 @@ export default function TeamMap({
                       textAlign: 'center',
                     }}
                   >
-                    <div style={{ fontSize: 11, color: '#94a3b8' }}>{label}</div>
+                    <div style={{ fontSize: 11, color: '#B9C6E8' }}>{label}</div>
                     <div
                       style={{
                         fontSize: 18,
@@ -1686,9 +1662,9 @@ export default function TeamMap({
                       flex: 1,
                       minHeight: 48,
                       borderRadius: 10,
-                      border: '1px solid #334155',
+                      border: '1px solid #3D5B96',
                       background: '#1e293b',
-                      color: '#e2e8f0',
+                      color: '#FFFFFF',
                       fontSize: 15,
                       fontWeight: 600,
                       cursor: 'pointer',
@@ -1727,9 +1703,9 @@ export default function TeamMap({
                     minHeight: 48,
                     padding: '0 18px',
                     borderRadius: 10,
-                    border: '1px solid #334155',
+                    border: '1px solid #3D5B96',
                     background: 'transparent',
-                    color: '#94a3b8',
+                    color: '#B9C6E8',
                     fontSize: 15,
                     cursor: 'pointer',
                   }}
@@ -1766,7 +1742,7 @@ export default function TeamMap({
               top: '10%',
               zIndex: 20,
               background: '#0f172a',
-              color: '#e2e8f0',
+              color: '#FFFFFF',
               borderRadius: 12,
               padding: 16,
               maxWidth: 480,
@@ -1779,7 +1755,7 @@ export default function TeamMap({
             <h3 style={{ margin: '0 0 12px', fontSize: 17 }}>
               Download offline map
             </h3>
-            <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 12px' }}>
+            <p style={{ fontSize: 13, color: '#B9C6E8', margin: '0 0 12px' }}>
               Saves the currently visible map area for offline use.
             </p>
 
@@ -1795,9 +1771,9 @@ export default function TeamMap({
                 width: '100%',
                 padding: '8px 10px',
                 borderRadius: 8,
-                border: '1px solid #334155',
+                border: '1px solid #3D5B96',
                 background: '#1e293b',
-                color: '#e2e8f0',
+                color: '#FFFFFF',
                 fontSize: 14,
                 marginBottom: 12,
                 boxSizing: 'border-box',
@@ -1817,9 +1793,9 @@ export default function TeamMap({
                     width: '100%',
                     padding: '8px',
                     borderRadius: 8,
-                    border: '1px solid #334155',
+                    border: '1px solid #3D5B96',
                     background: '#1e293b',
-                    color: '#e2e8f0',
+                    color: '#FFFFFF',
                     fontSize: 14,
                   }}
                 >
@@ -1840,9 +1816,9 @@ export default function TeamMap({
                     width: '100%',
                     padding: '8px',
                     borderRadius: 8,
-                    border: '1px solid #334155',
+                    border: '1px solid #3D5B96',
                     background: '#1e293b',
-                    color: '#e2e8f0',
+                    color: '#FFFFFF',
                     fontSize: 14,
                   }}
                 >
@@ -1859,7 +1835,7 @@ export default function TeamMap({
                 <div
                   style={{
                     fontSize: 13,
-                    color: est.exceedsCap ? '#fca5a5' : '#94a3b8',
+                    color: est.exceedsCap ? '#fca5a5' : '#B9C6E8',
                     marginBottom: 12,
                     padding: '8px 10px',
                     borderRadius: 8,
@@ -1897,7 +1873,7 @@ export default function TeamMap({
                     }}
                   />
                 </div>
-                <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                <div style={{ fontSize: 12, color: '#B9C6E8' }}>
                   {dlProgress.done.toLocaleString()} / {dlProgress.total.toLocaleString()} tiles
                   {' · '}{formatBytes(dlProgress.bytes)}
                   {dlProgress.failed > 0 && ` · ${dlProgress.failed} failed`}
@@ -1913,7 +1889,7 @@ export default function TeamMap({
 
             {dlDone && (
               <div style={{ fontSize: 13, color: '#86efac', marginBottom: 12, fontWeight: 600 }}>
-                ✓ Download complete. This area is available offline.
+                Download complete. This area is available offline.
               </div>
             )}
 
@@ -1948,9 +1924,9 @@ export default function TeamMap({
                       flex: 1,
                       minHeight: 48,
                       borderRadius: 10,
-                      border: '1px solid #334155',
+                      border: '1px solid #3D5B96',
                       background: 'transparent',
-                      color: '#94a3b8',
+                      color: '#B9C6E8',
                       fontSize: 15,
                       cursor: 'pointer',
                     }}
@@ -2006,7 +1982,7 @@ export default function TeamMap({
               top: '10%',
               zIndex: 20,
               background: '#0f172a',
-              color: '#e2e8f0',
+              color: '#FFFFFF',
               borderRadius: 12,
               padding: 16,
               maxWidth: 480,
@@ -2017,13 +1993,13 @@ export default function TeamMap({
             }}
           >
             <h3 style={{ margin: '0 0 4px', fontSize: 17 }}>Offline maps</h3>
-            <p style={{ fontSize: 13, color: '#94a3b8', margin: '0 0 12px' }}>
+            <p style={{ fontSize: 13, color: '#B9C6E8', margin: '0 0 12px' }}>
               {tileUsage.tiles.toLocaleString()} tiles · {formatBytes(tileUsage.bytes)} used
             </p>
             {offlineAreas.length === 0 ? (
-              <p style={{ fontSize: 14, color: '#94a3b8' }}>
+              <p style={{ fontSize: 14, color: '#B9C6E8' }}>
                 No offline areas downloaded yet. Pan the map to your work area
-                and tap "⬇ Offline map".
+                and tap "Offline map".
               </p>
             ) : (
               offlineAreas.map((a) => (
@@ -2039,7 +2015,7 @@ export default function TeamMap({
                 >
                   <div style={{ flex: 1 }}>
                     <div style={{ fontWeight: 600, fontSize: 14 }}>{a.name}</div>
-                    <div style={{ fontSize: 12, color: '#94a3b8' }}>
+                    <div style={{ fontSize: 12, color: '#B9C6E8' }}>
                       z{a.minZoom}–z{a.maxZoom} · {a.downloadedTiles.toLocaleString()} tiles ·{' '}
                       {formatBytes(a.sizeBytes)}
                     </div>
@@ -2070,9 +2046,9 @@ export default function TeamMap({
                 minHeight: 44,
                 marginTop: 12,
                 borderRadius: 10,
-                border: '1px solid #334155',
+                border: '1px solid #3D5B96',
                 background: 'transparent',
-                color: '#94a3b8',
+                color: '#B9C6E8',
                 fontSize: 15,
                 cursor: 'pointer',
               }}
