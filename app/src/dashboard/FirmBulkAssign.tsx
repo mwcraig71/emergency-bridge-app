@@ -344,7 +344,7 @@ export default function FirmBulkAssign({ firms, onFirmsChanged }: Props) {
               <h3 style={{ marginBottom: 4 }}>Not found</h3>
               <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
                 {notFound.map((raw) => (
-                  <span key={raw} className="pill" style={{ background: '#7f1d1d' }}>
+                  <span key={raw} className="pill" style={{ background: '#7A1F08', color: '#fff' }}>
                     {raw}
                   </span>
                 ))}
