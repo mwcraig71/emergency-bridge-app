@@ -15,6 +15,7 @@ import {
   unreadNotificationCount,
   markAssignmentInProgress,
   markNotificationRead,
+  assignToSelf,
 } from '../lib/assignments';
 import {
   inspectionsToGeoJSON,
@@ -94,6 +95,41 @@ const FieldApp: React.FC = () => {
       setUnreadCount(0);
     }
   }, []);
+
+  // Asset IDs for the map's assignment filter (NBI = background data).
+  const assignedAssetIds = useMemo(
+    () => myAssignments.map((a) => a.asset_id),
+    [myAssignments],
+  );
+
+  // Brief confirmation after "Add to my list" from the map.
+  const [assignConfirm, setAssignConfirm] = useState<string | null>(null);
+  const assignConfirmTimer = React.useRef<number | null>(null);
+
+  const handleAssignToSelf = useCallback(
+    async (bridge: Bridge) => {
+      const name = inspectorName.trim();
+      if (!name) {
+        setTab('sync');
+        return;
+      }
+      try {
+        await assignToSelf(bridge.asset_id, name);
+      } catch {
+        // assignToSelf is best-effort and never throws; defensive.
+      }
+      await refreshAssignments(name);
+      if (assignConfirmTimer.current) {
+        window.clearTimeout(assignConfirmTimer.current);
+      }
+      setAssignConfirm(`Added ${bridge.asset_id} to your list`);
+      assignConfirmTimer.current = window.setTimeout(
+        () => setAssignConfirm(null),
+        3500,
+      );
+    },
+    [inspectorName, refreshAssignments],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -613,9 +649,34 @@ const FieldApp: React.FC = () => {
         showLocate
         showOfflineDownload
         height="100%"
+        assignedAssetIds={assignedAssetIds}
+        onAssignToSelf={handleAssignToSelf}
         onStartInspection={handleSelectBridge}
         onGetDirections={(b) => setDirectionsBridge(b)}
       />
+      {assignConfirm && (
+        <div
+          role="status"
+          style={{
+            position: 'absolute',
+            bottom: 76,
+            left: '50%',
+            transform: 'translateX(-50%)',
+            zIndex: 20,
+            background: '#0f172a',
+            color: '#facc15',
+            border: '1px solid #facc15',
+            borderRadius: 999,
+            padding: '10px 18px',
+            fontSize: 14,
+            fontWeight: 700,
+            whiteSpace: 'nowrap',
+            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+          }}
+        >
+          ✓ {assignConfirm}
+        </div>
+      )}
     </div>
   );
 
