@@ -1,5 +1,6 @@
 import type { PhotoRef, PhotoType } from '../types';
 import React from 'react';
+import Icon from '../components/Icon';
 
 interface PhotoSectionProps {
   photos: PhotoRef[];
@@ -77,7 +78,7 @@ export default function PhotoSection(props: PhotoSectionProps): React.JSX.Elemen
       }}
       aria-label={label}
     >
-      {busy ? 'Capturing…' : '+ Add photo'}
+      {busy ? 'Capturing…' : (<><Icon name="camera" size={16} /> Add photo</>)}
     </button>
   );
 
