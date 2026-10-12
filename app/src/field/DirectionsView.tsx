@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import type { Bridge } from '../types';
+import Icon from '../components/Icon';
 import { watchGps, type GpsFix } from '../lib/location';
 import {
   bearingDegrees,
@@ -156,13 +157,12 @@ export default function DirectionsView({ bridge, onClose }: Props): React.JSX.El
         ) : (
           <>
             <button
-              className="btn"
               type="button"
               onClick={onClose}
               aria-label="Close"
-              style={{ flex: '0 0 auto' }}
+              className="btn-close"
             >
-              ✕
+              <Icon name="x" size={22} />
             </button>
             <div style={{ flex: 1 }}>
               <div style={{ fontWeight: 700 }}>{bridge.asset_id}</div>
@@ -234,7 +234,7 @@ export default function DirectionsView({ bridge, onClose }: Props): React.JSX.El
 
             {nearbyClosures != null && nearbyClosures > 0 && (
               <div className="warn-box" style={{ marginTop: 8 }}>
-                ⚠ {nearbyClosures} road closure{nearbyClosures === 1 ? '' : 's'}{' '}
+                <Icon name="alert" size={16} /> {nearbyClosures} road closure{nearbyClosures === 1 ? '' : 's'}{' '}
                 reported near this bridge
               </div>
             )}
