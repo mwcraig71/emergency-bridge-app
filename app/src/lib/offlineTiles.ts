@@ -218,32 +218,48 @@ export async function downloadTiles(
   }
   report();
 
-  // Fetch missing tiles with bounded concurrency.
+  // Fetch missing tiles with bounded concurrency and retry.
+  const MAX_RETRIES = 3;
   for (let i = 0; i < missing.length; i += CONCURRENCY) {
     if (shouldCancel?.()) break;
     const batch = missing.slice(i, i + CONCURRENCY);
     const results = await Promise.all(
       batch.map(async (t) => {
-        try {
-          const resp = await fetch(tileUrl(t.z, t.x, t.y));
-          if (!resp.ok) return { t, ok: false as const };
-          const data = await resp.arrayBuffer();
-          if (data.byteLength === 0) return { t, ok: false as const };
-          const rec: StoredTile = {
-            key: tileKey(t.z, t.x, t.y),
-            z: t.z,
-            x: t.x,
-            y: t.y,
-            data,
-            url: tileUrl(t.z, t.x, t.y),
-            downloadedAt: new Date().toISOString(),
-            sizeBytes: data.byteLength,
-          };
-          await idbPut('offlineTiles', rec);
-          return { t, ok: true as const, bytes: data.byteLength };
-        } catch {
-          return { t, ok: false as const };
+        let lastError: unknown = null;
+        for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+          try {
+            if (attempt > 0) {
+              // Exponential backoff: 500ms, 1000ms, 2000ms...
+              await new Promise((r) => setTimeout(r, 500 * Math.pow(2, attempt - 1)));
+            }
+            const resp = await fetch(tileUrl(t.z, t.x, t.y));
+            if (!resp.ok) {
+              lastError = new Error(`HTTP ${resp.status}`);
+              continue; // retry
+            }
+            const data = await resp.arrayBuffer();
+            if (data.byteLength === 0) {
+              lastError = new Error('Empty response');
+              continue; // retry
+            }
+            const rec: StoredTile = {
+              key: tileKey(t.z, t.x, t.y),
+              z: t.z,
+              x: t.x,
+              y: t.y,
+              data,
+              url: tileUrl(t.z, t.x, t.y),
+              downloadedAt: new Date().toISOString(),
+              sizeBytes: data.byteLength,
+            };
+            await idbPut('offlineTiles', rec);
+            return { t, ok: true as const, bytes: data.byteLength };
+          } catch (err) {
+            lastError = err;
+            // retry on network errors
+          }
         }
+        return { t, ok: false as const, error: lastError };
       }),
     );
     for (const r of results) {
@@ -281,16 +297,28 @@ export async function listOfflineAreas(): Promise<OfflineArea[]> {
   }
 }
 
-/** Delete an offline area and all its tiles. */
+/** Delete an offline area and its tiles (only tiles not shared with other areas). */
 export async function deleteOfflineArea(id: string): Promise<void> {
   const area = await idbGet<StoredArea>('offlineAreas', id);
   if (!area) return;
+
+  // Find tiles that are still needed by OTHER areas to avoid breaking overlaps.
+  const otherAreas = (await listOfflineAreas()).filter((a) => a.id !== id);
+  const sharedKeys = new Set<string>();
+  for (const other of otherAreas) {
+    const otherTiles = tilesForBounds(other.bounds, other.minZoom, other.maxZoom);
+    for (const t of otherTiles) {
+      sharedKeys.add(tileKey(t.z, t.x, t.y));
+    }
+  }
+
   const tiles = tilesForBounds(area.bounds, area.minZoom, area.maxZoom);
-  // Delete in chunks to avoid long transactions.
+  // Delete in chunks to avoid long transactions. Skip shared tiles.
   const CHUNK = 500;
-  for (let i = 0; i < tiles.length; i += CHUNK) {
+  const toDelete = tiles.filter((t) => !sharedKeys.has(tileKey(t.z, t.x, t.y)));
+  for (let i = 0; i < toDelete.length; i += CHUNK) {
     await Promise.all(
-      tiles.slice(i, i + CHUNK).map((t) => idbDelete('offlineTiles', tileKey(t.z, t.x, t.y)).catch(() => {})),
+      toDelete.slice(i, i + CHUNK).map((t) => idbDelete('offlineTiles', tileKey(t.z, t.x, t.y)).catch(() => {})),
     );
   }
   await idbDelete('offlineAreas', id);

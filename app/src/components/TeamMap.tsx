@@ -78,11 +78,21 @@ function ensureOfflineProtocol(): void {
         const cached = await getOfflineTile(coord.z, coord.x, coord.y);
         if (cached) return { data: cached };
       }
-      // Cache miss (or unparseable URL) — fetch from the network.
+      // Cache miss — try network. If offline, this throws and MapLibre
+      // shows a blank tile (graceful degradation).
       const realUrl = realUrlFromOffline(params.url);
-      const resp = await fetch(realUrl);
-      if (!resp.ok) throw new Error(`Tile fetch failed: ${resp.status}`);
-      return { data: await resp.arrayBuffer() };
+      try {
+        const resp = await fetch(realUrl);
+        if (!resp.ok) throw new Error(`Tile fetch failed: ${resp.status}`);
+        return { data: await resp.arrayBuffer() };
+      } catch (err) {
+        // Offline with no cached tile: throw a clear error for debugging.
+        // MapLibre will render this tile as blank rather than crashing.
+        throw new Error(
+          `Offline tile not cached (${coord ? `${coord.z}/${coord.x}/${coord.y}` : params.url}): ` +
+          `${err instanceof Error ? err.message : 'network unavailable'}`
+        );
+      }
     });
   } catch {
     // Protocol already registered (HMR / double-mount) — safe to ignore.
