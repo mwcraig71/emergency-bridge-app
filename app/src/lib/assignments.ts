@@ -159,6 +159,57 @@ export async function markAssignmentInProgress(
 }
 
 /**
+ * Assign a bridge to the inspector's own list (from the map "Add to my list").
+ * Writes locally first for immediate UI update, then inserts the server row
+ * best-effort. Never throws — offline inspectors just get the local copy
+ * until the next assignments sync.
+ */
+export async function assignToSelf(
+  assetId: string,
+  inspectorName: string,
+): Promise<void> {
+  const name = inspectorName.trim();
+  if (!name) return;
+  const now = new Date().toISOString();
+  const local: Assignment = {
+    id: `local-${assetId}`,
+    asset_id: assetId,
+    assigned_to: name,
+    assigned_by: name,
+    assigned_at: now,
+    status: 'assigned',
+    completed_by: null,
+    completed_at: null,
+    notes: null,
+    created_at: now,
+  };
+  await idbPut('assignments', local);
+  if (!isOnline() || !isSupabaseConfigured()) return;
+  try {
+    const sb = getSupabase()!;
+    const { data, error } = await sb
+      .from('emg_assignments')
+      .insert({
+        asset_id: assetId,
+        assigned_to: name,
+        assigned_by: name,
+        status: 'assigned',
+      })
+      .select('id')
+      .single();
+    if (!error && data) {
+      const serverId = String((data as unknown as Record<string, unknown>).id ?? '');
+      if (serverId) {
+        await idbPut('assignments', { ...local, id: serverId });
+      }
+    }
+  } catch {
+    // Best effort — the local row keeps the map filtered correctly and the
+    // next syncAssignments() will reconcile with the server.
+  }
+}
+
+/**
  * Mark a notification read locally and on the server (best-effort).
  */
 export async function markNotificationRead(id: string): Promise<void> {
