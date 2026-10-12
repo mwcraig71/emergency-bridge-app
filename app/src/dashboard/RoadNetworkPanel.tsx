@@ -190,16 +190,16 @@ export default function RoadNetworkPanel(): React.JSX.Element {
                 <strong style={{ flex: '1 1 auto' }}>{r.road_name ?? 'Unnamed road'}</strong>
                 <span className="muted">{closureLabel(r.closure_type)}</span>
                 {reopened ? (
-                  <span className="pill" style={{ background: '#1f8f3d', color: '#fff' }}>
+                  <span className="pill" style={{ background: '#2E7D32', color: '#fff' }}>
                     REOPENED
                   </span>
                 ) : (
-                  <span className="pill" style={{ background: '#c62828', color: '#fff' }}>
+                  <span className="pill" style={{ background: '#7A1F08', color: '#fff' }}>
                     CLOSED
                   </span>
                 )}
                 {stale && (
-                  <span className="pill" style={{ background: '#f2b300', color: '#111' }} title="Older than 12h">
+                  <span className="pill" style={{ background: '#C9A227', color: '#1A1A1A' }} title="Older than 12h">
                     verify
                   </span>
                 )}
