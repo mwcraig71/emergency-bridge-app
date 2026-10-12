@@ -390,34 +390,38 @@ export default function StatusBoard({ onSelectBridge }: StatusBoardProps) {
           margin-bottom: 12px;
         }
         .stat {
-          background: #0f172a;
-          border: 1px solid #334155;
-          border-radius: 8px;
+          background: #fff;
+          border: 1px solid #DDDDDD;
+          border-top: 4px solid #CF3910;
+          border-radius: 2px;
           padding: 8px 10px;
           display: flex;
           flex-direction: column;
           gap: 2px;
         }
         .stat-count {
-          font-size: 18px;
+          font-family: 'Lato', 'Helvetica Neue', Arial, sans-serif;
+          font-size: 22px;
           font-weight: 700;
           line-height: 1;
+          color: #1A1A1A;
         }
         .stat-label {
+          font-family: 'Oswald', Arial, sans-serif;
           font-size: 10px;
           text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: #94a3b8;
+          letter-spacing: 0.12em;
+          color: #5A5A5A;
         }
-        .stat-closed .stat-count { color: #ef4444; }
-        .stat-destroyed .stat-count,
-        .stat-likely_destroyed .stat-count { color: #dc2626; }
-        .stat-ground_followup .stat-count { color: #f59e0b; }
-        .stat-revisit .stat-count { color: #eab308; }
-        .stat-reduced_load .stat-count { color: #f97316; }
-        .stat-restricted_lanes .stat-count { color: #fb923c; }
-        .stat-open .stat-count { color: #22c55e; }
-        .stat-not_started .stat-count { color: #94a3b8; }
+        .stat-closed .stat-count { color: #7A1F08; }
+        .stat-destroyed .stat-count { color: #7A1F08; }
+        .stat-likely_destroyed .stat-count { color: #CF3910; }
+        .stat-ground_followup .stat-count { color: #001A52; }
+        .stat-revisit .stat-count { color: #C9A227; }
+        .stat-reduced_load .stat-count { color: #C9A227; }
+        .stat-restricted_lanes .stat-count { color: #C9A227; }
+        .stat-open .stat-count { color: #2E7D32; }
+        .stat-not_started .stat-count { color: #9A9A9A; }
 
         .filters {
           display: flex;
@@ -436,13 +440,14 @@ export default function StatusBoard({ onSelectBridge }: StatusBoardProps) {
         }
         .filters select,
         .filters input {
-          background: #0f172a;
-          color: #e2e8f0;
-          border: 1px solid #334155;
-          border-radius: 6px;
+          background: #fff;
+          color: #1A1A1A;
+          border: 2px solid #DDDDDD;
+          border-radius: 2px;
           padding: 5px 8px;
           font-size: 13px;
           min-width: 110px;
+          min-height: 40px;
         }
 
         table.data {
@@ -453,17 +458,18 @@ export default function StatusBoard({ onSelectBridge }: StatusBoardProps) {
         table.data th,
         table.data td {
           text-align: left;
-          padding: 6px 8px;
-          border-bottom: 1px solid #334155;
+          padding: 8px 10px;
+          border-bottom: 1px solid #DDDDDD;
           white-space: nowrap;
         }
         table.data th {
-          color: #94a3b8;
-          font-weight: 600;
+          color: #fff;
+          font-family: 'Oswald', Arial, sans-serif;
+          font-weight: 500;
           font-size: 11px;
           text-transform: uppercase;
-          letter-spacing: 0.04em;
-          background: #0f172a;
+          letter-spacing: 0.1em;
+          background: #001A52;
         }
         table.data th.sortable {
           cursor: pointer;
