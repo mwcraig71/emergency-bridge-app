@@ -1,9 +1,9 @@
 // Minimal IndexedDB wrapper for the local-first store.
-// Stores: bridges cache, inspection drafts, sync queue, settings.
+// Stores: bridges cache, inspection drafts, sync queue, settings, photos.
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'emergency-bridge-app';
-const DB_VERSION = 5;
+const DB_VERSION = 6;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -11,8 +11,9 @@ function db(): Promise<IDBPDatabase> {
   if (!dbPromise) {
     dbPromise = openDB(DB_NAME, DB_VERSION, {
       upgrade(d) {
-        // contains() guards make this safe for fresh installs (v0→2)
-        // and upgrades (v1→2).
+        // contains() guards make this safe for fresh installs (v0→v6)
+        // and upgrades (any version → latest): each store is created only
+        // if it doesn't already exist.
         if (!d.objectStoreNames.contains('bridges'))
           d.createObjectStore('bridges', { keyPath: 'asset_id' });
         if (!d.objectStoreNames.contains('districts'))
@@ -43,6 +44,13 @@ function db(): Promise<IDBPDatabase> {
           d.createObjectStore('firms', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('inspectors'))
           d.createObjectStore('inspectors', { keyPath: 'id' });
+        // v6: roadblock photos — the roadblock report screen saves closure
+        // photos here (keyPath 'id' is `${roadblockId}-photo`; the record also
+        // carries roadblockId). Roadblock photos have no server column, so
+        // they persist on-device and are shown alongside their report.
+        // The contains() guard keeps v5→v6 upgrades and fresh installs clean.
+        if (!d.objectStoreNames.contains('photos'))
+          d.createObjectStore('photos', { keyPath: 'id' });
       },
     });
   }

@@ -7,7 +7,14 @@ import TeamMap from '../components/TeamMap';
 import Icon from '../components/Icon';
 import type { Bridge, InspectionDraft, ActiveSession, Assignment, AppNotification } from '../types';
 import { idbGetAll, idbPut, idbGet, idbDelete } from '../lib/idb';
-import { pushQueue, pendingCount, clearQueue } from '../lib/sync';
+import {
+  newSessionId,
+  markSessionLive,
+  markSessionEnded,
+  isLiveSession,
+  isSameSession,
+} from '../lib/crashSession';
+import { pushQueue, pendingCount, pendingPhotos, clearQueue } from '../lib/sync';
 import {
   syncAssignments,
   syncNotifications,
@@ -34,6 +41,7 @@ const FieldApp: React.FC = () => {
   const [resumeDraft, setResumeDraft] = useState<InspectionDraft | null>(null);
   const [drafts, setDrafts] = useState<InspectionDraft[]>([]);
   const [pending, setPending] = useState<number>(0);
+  const [pendingPhotosCount, setPendingPhotosCount] = useState<number>(0);
   const [syncing, setSyncing] = useState(false);
   const [syncResult, setSyncResult] = useState<string | null>(null);
   const [directionsBridge, setDirectionsBridge] = useState<Bridge | null>(null);
@@ -43,6 +51,8 @@ const FieldApp: React.FC = () => {
     session: ActiveSession;
     draft: InspectionDraft;
   } | null>(null);
+  // Step to restore TriageFlow to on resume (from the session marker).
+  const [resumeStep, setResumeStep] = useState<string | undefined>(undefined);
   // Team assignments + notifications
   const [myAssignments, setMyAssignments] = useState<Assignment[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -64,6 +74,12 @@ const FieldApp: React.FC = () => {
       setPending(typeof p === 'number' ? p : 0);
     } catch {
       setPending(0);
+    }
+    try {
+      const pp = await pendingPhotos();
+      setPendingPhotosCount(typeof pp === 'number' ? pp : 0);
+    } catch {
+      setPendingPhotosCount(0);
     }
   }, []);
 
@@ -170,9 +186,18 @@ const FieldApp: React.FC = () => {
   // --- Crash-resilience: active session tracking ---
 
   const saveActiveSession = useCallback(async (bridge: Bridge) => {
+    // Never create a marker without an asset_id — a blank id would poison
+    // the crash-resume check. Guard before claiming the session id.
+    if (!bridge.asset_id || !bridge.asset_id.trim()) return;
+    // Claim the session id SYNCHRONOUSLY (before the first await) so the
+    // startup resume-check — which may still be in flight — can never treat
+    // this new marker as stale. Works even for fire-and-forget callers.
+    const sessionId = newSessionId();
+    markSessionLive(sessionId);
     const now = new Date().toISOString();
     const session: ActiveSession = {
       key: 'active_session',
+      session_id: sessionId,
       asset_id: bridge.asset_id,
       bridge_info: bridge,
       started_at: now,
@@ -186,6 +211,9 @@ const FieldApp: React.FC = () => {
   }, []);
 
   const clearActiveSession = useCallback(async () => {
+    // Release ownership synchronously so an in-flight heartbeat can't
+    // resurrect the marker it is about to delete.
+    markSessionEnded();
     try {
       await idbDelete('settings', 'active_session');
     } catch {
@@ -197,6 +225,15 @@ const FieldApp: React.FC = () => {
   // On startup: check for an interrupted inspection session. If the
   // session's draft still exists and is in progress, offer to resume.
   // Otherwise silently clear the stale marker.
+  //
+  // Race note: this check is async and can interleave with a session the
+  // user just started (its marker write may land before or after our reads).
+  // Two guards keep our own startup from killing the new live marker:
+  //  1. If the stored marker is this instance's live session, bail out —
+  //     never banner it, never delete it.
+  //  2. Before the stale-marker delete, re-read and only delete the exact
+  //     session we inspected. The fixed 'active_session' key means an
+  //     unconditional delete could otherwise wipe a newer session.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -205,7 +242,22 @@ const FieldApp: React.FC = () => {
           'settings',
           'active_session'
         )) as ActiveSession | undefined;
-        if (!session || !session.asset_id) return;
+        if (!session) return;
+        if (isLiveSession(session.session_id)) return;
+        if (!session.asset_id || !session.asset_id.trim()) {
+          // Poisoned marker (blank asset_id) — discard it, but only if the
+          // marker is still the session we read above (startup race guard).
+          const current = (await idbGet<ActiveSession>(
+            'settings',
+            'active_session'
+          )) as ActiveSession | undefined;
+          if (cancelled) return;
+          if (isLiveSession(current?.session_id)) return;
+          if (isSameSession(current, session)) {
+            await idbDelete('settings', 'active_session');
+          }
+          return;
+        }
         const all = (await idbGetAll<InspectionDraft>('drafts')) ?? [];
         const draft = all.find(
           (d) =>
@@ -216,8 +268,17 @@ const FieldApp: React.FC = () => {
         if (draft) {
           setCrashSession({ session, draft });
         } else {
-          // Stale: draft gone or already completed — clear silently
-          await idbDelete('settings', 'active_session');
+          // Stale: draft gone or already completed — clear silently, but only
+          // if the marker is still the session we read above.
+          const current = (await idbGet<ActiveSession>(
+            'settings',
+            'active_session'
+          )) as ActiveSession | undefined;
+          if (cancelled) return;
+          if (isLiveSession(current?.session_id)) return;
+          if (isSameSession(current, session)) {
+            await idbDelete('settings', 'active_session');
+          }
         }
       } catch {
         // ignore
@@ -303,6 +364,9 @@ const FieldApp: React.FC = () => {
       } as unknown as Bridge);
     setActiveBridge(bridge);
     setResumeDraft(draft);
+    // Carry the stored step through crash-resume (TriageFlow sanitizes it);
+    // unconditional set so a stale step can never leak from a previous resume.
+    setResumeStep(crashSession?.session.step ? crashSession.session.step : undefined);
     setCrashSession(null);
     setTab('inspect');
     void saveActiveSession(bridge);
@@ -311,6 +375,7 @@ const FieldApp: React.FC = () => {
   const handleTriageDone = async () => {
     setActiveBridge(null);
     setResumeDraft(null);
+    setResumeStep(undefined);
     await clearActiveSession();
     await refreshDrafts();
     setTab('inspect');
@@ -319,6 +384,7 @@ const FieldApp: React.FC = () => {
   const handleTriageCancel = () => {
     setActiveBridge(null);
     setResumeDraft(null);
+    setResumeStep(undefined);
     void clearActiveSession();
   };
 
@@ -446,6 +512,7 @@ const FieldApp: React.FC = () => {
           bridge={activeBridge}
           inspectorName={inspectorName}
           existingDraft={resumeDraft ?? undefined}
+          initialStep={resumeStep}
           onDone={() => void handleTriageDone()}
           onCancel={handleTriageCancel}
         />
@@ -716,6 +783,12 @@ const FieldApp: React.FC = () => {
         <h3 style={{ marginTop: 0 }}>Sync</h3>
         <div className="muted" style={{ marginBottom: 12 }}>
           {pending} item{pending === 1 ? '' : 's'} pending
+          {pendingPhotosCount > 0 && (
+            <>
+              {' '}· {pendingPhotosCount} photo
+              {pendingPhotosCount === 1 ? '' : 's'} awaiting upload
+            </>
+          )}
         </div>
         <button
           className="btn"

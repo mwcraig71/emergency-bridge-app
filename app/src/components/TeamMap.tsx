@@ -546,6 +546,15 @@ export default function TeamMap({
         if (err) setStyleError(true);
       });
 
+      // Clear a stuck/transient tile-error banner once tiles start loading
+      // successfully again (successful tile loads fire data events with
+      // sourceDataType 'content'; tile failures only fire 'error').
+      map.on('data', (e: maplibregl.MapSourceDataEvent) => {
+        if (e.dataType === 'source' && e.sourceDataType === 'content') {
+          setStyleError(false);
+        }
+      });
+
       map.on('load', () => {
         if (cancelled) return;
         setReady(true);
@@ -1480,9 +1489,38 @@ export default function TeamMap({
             borderRadius: 2,
             fontSize: 12,
             maxWidth: 260,
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
           }}
         >
-          Map tiles unavailable offline — GPS and data layers still work.
+          <span style={{ flex: 1 }}>
+            Map tiles unavailable offline — GPS and data layers still work.
+          </span>
+          <button
+            type="button"
+            aria-label="Dismiss map error"
+            onClick={() => setStyleError(false)}
+            style={{
+              minWidth: 44,
+              minHeight: 44,
+              width: 44,
+              height: 44,
+              margin: -6,
+              background: 'transparent',
+              border: 'none',
+              color: '#fee2e2',
+              fontSize: 18,
+              lineHeight: 1,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: 0,
+            }}
+          >
+            ×
+          </button>
         </div>
       )}
 

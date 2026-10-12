@@ -1,5 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  ActiveSession,
   Bridge,
   InspectionDraft,
   PhotoRef,
@@ -14,6 +15,7 @@ import { capturePhoto } from '../lib/camera';
 import { getGpsFix } from '../lib/location';
 import { isCoordMismatch } from '../lib/geo';
 import { idbPut, idbGet } from '../lib/idb';
+import { isLiveSession } from '../lib/crashSession';
 import { enqueue } from '../lib/sync';
 import PhotoSection from './PhotoSection';
 
@@ -21,6 +23,7 @@ interface TriageFlowProps {
   bridge: Bridge;
   inspectorName: string;
   existingDraft?: InspectionDraft;
+  initialStep?: string;
   onDone: (draft: InspectionDraft) => void;
   onCancel: () => void;
 }
@@ -77,6 +80,7 @@ function freshDraft(bridge: Bridge, inspectorName: string): InspectionDraft {
     bridge_still_there: null,
     overtopped: null,
     overtop_depth_ft: null,
+    overtop_depth_unknown: false,
     damage_rail: 'no',
     damage_deck: 'no',
     damage_super: 'no',
@@ -218,13 +222,20 @@ function ProgressDots({ step }: { step: Step }) {
   );
 }
 
+function sanitizeStep(value: string | undefined): Step {
+  if (!value) return 'destroyed';
+  if (value === 'review_likely_destroyed') return 'destroyed';
+  if ((STEP_ORDER as string[]).includes(value)) return value as Step;
+  return 'destroyed';
+}
+
 export default function TriageFlow(props: TriageFlowProps) {
-  const { bridge, inspectorName, existingDraft, onDone, onCancel } = props;
+  const { bridge, inspectorName, existingDraft, initialStep, onDone, onCancel } = props;
 
   const [draft, setDraft] = useState<InspectionDraft>(
     () => existingDraft ?? freshDraft(bridge, inspectorName),
   );
-  const [step, setStep] = useState<Step>('destroyed');
+  const [step, setStep] = useState<Step>(() => sanitizeStep(initialStep));
   const [busy, setBusy] = useState(false);
   const [gpsBanner, setGpsBanner] = useState(false);
   const gpsAppliedRef = useRef(false);
@@ -268,23 +279,33 @@ export default function TriageFlow(props: TriageFlowProps) {
 
   // Crash-resilience heartbeat: refresh the active session's last_active
   // every 30s so a crash/power loss can offer resume on next launch.
+  // Only ever updates this instance's live session marker — after a
+  // submit/cancel clears the session, an in-flight beat must not resurrect
+  // the deleted marker.
   useEffect(() => {
     let cancelled = false;
     const beat = async () => {
       try {
         const session = (await idbGet<{
           key: string;
+          session_id?: string;
           asset_id: string;
           last_active: string;
         }>('settings', 'active_session')) as
           | (Record<string, unknown> & {
               key: string;
+              session_id?: string;
               asset_id: string;
               last_active: string;
             })
           | undefined;
         if (cancelled) return;
-        if (session && session.asset_id === bridge.asset_id) {
+        if (!bridge.asset_id || !bridge.asset_id.trim()) return;
+        if (
+          session &&
+          session.asset_id === bridge.asset_id &&
+          isLiveSession(session.session_id)
+        ) {
           await idbPut('settings', {
             ...session,
             last_active: new Date().toISOString(),
@@ -304,6 +325,40 @@ export default function TriageFlow(props: TriageFlowProps) {
     };
   }, [bridge.asset_id]);
 
+  // Persist the current step into the session marker so crash-resume
+  // restores the inspector to the last logical step instead of step 0.
+  // Only ever touches this instance's live marker (see crashSession.ts).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        if (!bridge.asset_id || !bridge.asset_id.trim()) return;
+        if ((step as string) === 'review_likely_destroyed') return;
+        const session = (await idbGet<ActiveSession>(
+          'settings',
+          'active_session',
+        )) as ActiveSession | undefined;
+        if (cancelled) return;
+        if (
+          session &&
+          session.asset_id === bridge.asset_id &&
+          isLiveSession(session.session_id)
+        ) {
+          await idbPut('settings', {
+            ...session,
+            step,
+            last_active: new Date().toISOString(),
+          });
+        }
+      } catch {
+        /* silent */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [step, bridge.asset_id]);
+
   const damageFlags = useMemo(
     () => ({
       rail: draft.damage_rail === 'yes',
@@ -320,8 +375,41 @@ export default function TriageFlow(props: TriageFlowProps) {
       // Validate required fields before queuing — don't let incomplete
       // inspections into the sync queue.
       const missing: string[] = [];
-      if (!draft.destroyed) missing.push('Was the bridge destroyed?');
-      if (!draft.inspector_name?.trim()) missing.push('Inspector name');
+      if (!draft.destroyed) missing.push('Answer: was the bridge destroyed?');
+      if (!draft.inspector_name?.trim()) missing.push('Enter inspector name');
+      if (!draft.asset_id || !draft.asset_id.trim())
+        missing.push('Bridge asset ID missing');
+      if (triage === 'destroyed') {
+        if (!destroyedProfile) missing.push('Add bridge profile photo');
+        if (!destroyedApproach) missing.push('Add approach photo');
+      }
+      if (triage === 'complete') {
+        if (!draft.access)
+          missing.push('Answer: were you able to access the bridge?');
+        if (!draft.overtopped)
+          missing.push('Answer: has the bridge overtopped?');
+        if (draft.overtopped === 'yes') {
+          const depthOk =
+            (typeof draft.overtop_depth_ft === 'number' &&
+              Number.isFinite(draft.overtop_depth_ft) &&
+              draft.overtop_depth_ft >= 0) ||
+            draft.overtop_depth_unknown === true;
+          if (!depthOk) missing.push('Enter overtopping depth or mark unknown');
+        }
+        if (!draft.remain_open)
+          missing.push('Answer: can the bridge remain open?');
+        if (!draft.safe_load)
+          missing.push('Answer: is it safe to carry load?');
+        if (!draft.debris_amount) missing.push('Answer: debris at bridge');
+      }
+      if (triage === 'revisit') {
+        if (!draft.drone_used)
+          missing.push('Answer: was drone reconnaissance used?');
+      }
+      if (triage === 'ground_followup' || triage === 'likely_destroyed') {
+        if (!draft.bridge_still_there)
+          missing.push('Answer: is the bridge still there?');
+      }
       if (missing.length > 0) {
         alert(
           `Cannot finish inspection. Please complete:\n• ${missing.join('\n• ')}`
@@ -390,7 +478,9 @@ export default function TriageFlow(props: TriageFlowProps) {
 
   const overtopDepthValid =
     draft.overtopped === 'yes'
-      ? typeof draft.overtop_depth_ft === 'number' && draft.overtop_depth_ft >= 0
+      ? (typeof draft.overtop_depth_ft === 'number' &&
+          draft.overtop_depth_ft >= 0) ||
+        draft.overtop_depth_unknown === true
       : true;
 
   // Handlers
@@ -626,7 +716,7 @@ export default function TriageFlow(props: TriageFlowProps) {
               ...d,
               overtopped: 'yes',
               overtop_depth_ft:
-                typeof d.overtop_depth_ft === 'number' ? d.overtop_depth_ft : 0,
+                typeof d.overtop_depth_ft === 'number' ? d.overtop_depth_ft : null,
             }))
           }
         >
@@ -641,6 +731,7 @@ export default function TriageFlow(props: TriageFlowProps) {
               ...d,
               overtopped: 'no',
               overtop_depth_ft: null,
+              overtop_depth_unknown: false,
             }))
           }
         >
@@ -673,9 +764,31 @@ export default function TriageFlow(props: TriageFlowProps) {
               }
               const n = Number(v);
               if (!Number.isFinite(n) || n < 0) return;
-              setDraft((d) => ({ ...d, overtop_depth_ft: n }));
+              setDraft((d) => ({
+                ...d,
+                overtop_depth_ft: n,
+                overtop_depth_unknown: false,
+              }));
             }}
           />
+          <button
+            type="button"
+            className={`btn${draft.overtop_depth_unknown ? ' active' : ' secondary'}`}
+            aria-pressed={draft.overtop_depth_unknown === true}
+            onClick={() =>
+              setDraft((d) => {
+                const next = !d.overtop_depth_unknown;
+                return {
+                  ...d,
+                  overtop_depth_unknown: next,
+                  overtop_depth_ft: next ? null : d.overtop_depth_ft,
+                };
+              })
+            }
+            style={{ marginTop: 8, minHeight: 44, width: '100%' }}
+          >
+            Depth unknown
+          </button>
         </div>
       ) : null}
 
@@ -896,7 +1009,9 @@ export default function TriageFlow(props: TriageFlowProps) {
   const renderReview = () => {
     const overtopLine =
       draft.overtopped === 'yes'
-        ? `Yes — max ${typeof draft.overtop_depth_ft === 'number' ? draft.overtop_depth_ft : '—'} ft`
+        ? draft.overtop_depth_unknown
+          ? 'Yes — depth Unknown'
+          : `Yes — max ${typeof draft.overtop_depth_ft === 'number' ? draft.overtop_depth_ft : '—'} ft`
         : draft.overtopped === 'no'
           ? 'No'
           : '—';

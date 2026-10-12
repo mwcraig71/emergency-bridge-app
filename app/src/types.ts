@@ -106,6 +106,8 @@ export interface InspectionDraft {
   triage_list: TriageList;
   overtopped: YesNo | null;
   overtop_depth_ft: number | null;
+  /** Explicit "depth unknown" marker; when true, overtop_depth_ft stays null. */
+  overtop_depth_unknown?: boolean;
   damage_rail: YesNo;
   damage_deck: YesNo;
   damage_super: YesNo;
@@ -145,10 +147,15 @@ export interface Roadblock {
  *  `settings` store under key 'active_session'. */
 export interface ActiveSession {
   key: 'active_session';
+  /** Unique per creation; distinguishes a fresh marker from an older one
+   *  sharing the fixed 'active_session' key (see lib/crashSession.ts). */
+  session_id: string;
   asset_id: string;
   bridge_info: Bridge;
   started_at: string; // ISO timestamp
   last_active: string; // ISO timestamp, updated every 30s during inspection
+  /** Current Step name in TriageFlow, restored on crash-resume. */
+  step?: string;
 }
 
 export interface RoadStatusPin {

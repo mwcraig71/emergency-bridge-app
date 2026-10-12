@@ -32,6 +32,14 @@ export async function pushQueue(): Promise<{
   const sb = getSupabase();
   if (!sb || !isOnline()) return { pushed: 0, failed: 0, errors: [] };
   const items = await idbGetAll<SyncQueueItem>('syncQueue');
+  // Inspections must push before their photos: process 'inspection' items
+  // first, then everything else in enqueue order. (Queue keys are random
+  // UUIDs, so raw IndexedDB order is arbitrary.)
+  items.sort(
+    (a, b) =>
+      (a.kind === 'inspection' ? 0 : 1) - (b.kind === 'inspection' ? 0 : 1) ||
+      a.created_at.localeCompare(b.created_at),
+  );
   let pushed = 0;
   let failed = 0;
   const errors: string[] = [];
@@ -101,6 +109,26 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
         .from('emg_inspections')
         .upsert(row, { onConflict: 'client_inspection_id' });
       if (error) throw new Error(error.message);
+      // Photos ride with the inspection: upload each one now that the server
+      // row exists. pushPhoto is idempotent, so a retry is safe; any failure
+      // keeps the whole inspection item queued so nothing is silently dropped.
+      const { data: inspRow } = await sb
+        .from('emg_inspections')
+        .select('id')
+        .eq('client_inspection_id', d.client_inspection_id)
+        .maybeSingle();
+      const serverId = (inspRow as { id: string } | null)?.id;
+      if (!serverId) {
+        throw new Error('inspection upserted but server row not found');
+      }
+      for (const photo of d.photos ?? []) {
+        try {
+          await pushPhoto(sb, serverId, photo);
+        } catch (e) {
+          const msg = e instanceof Error ? e.message : String(e);
+          throw new Error(`photo (${photo.id.slice(0, 8)}): ${msg}`);
+        }
+      }
       // Mark the local draft as synced so pendingCount doesn't count it.
       try {
         const draft = await idbGetAll<InspectionDraft>('drafts').then(
@@ -139,28 +167,91 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
         inspection_client_id: string;
         photo: PhotoRef;
       };
-      // Look up the server inspection id by client key, then insert metadata.
-      // Binary upload to Storage is handled separately (Phase 2); for now the
-      // dataUrl is too large for a row — metadata only, photo queued locally.
+      // Stand-alone photo queue item (e.g. a photo added after the
+      // inspection already synced). Look up the server inspection id,
+      // then run the same idempotent upload path as the inspection case.
       const { data: insp } = await sb
         .from('emg_inspections')
         .select('id')
         .eq('client_inspection_id', p.inspection_client_id)
         .maybeSingle();
       if (!insp) throw new Error('inspection not synced yet; photo deferred');
-      const { error } = await sb.from('emg_inspection_photos').insert({
-        inspection_id: (insp as { id: string }).id,
-        photo_type: p.photo.photo_type,
-        storage_path: p.photo.storage_path ?? `pending/${p.photo.id}.jpg`,
-        description: p.photo.description ?? null,
-        taken_at: p.photo.taken_at,
-      });
-      if (error) throw new Error(error.message);
+      try {
+        await pushPhoto(sb, (insp as { id: string }).id, p.photo);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`photo (${p.photo.id.slice(0, 8)}): ${msg}`);
+      }
       break;
     }
     default:
       throw new Error(`pushOne: unsupported kind ${item.kind}`);
   }
+}
+
+/** Supabase Storage bucket for inspection photo binaries. Created by
+ *  supabase/migrations/010_photo_storage.sql (NOT RUN yet). */
+const PHOTO_BUCKET = 'emg-photos';
+
+async function dataUrlToBlob(dataUrl: string): Promise<Blob> {
+  const res = await fetch(dataUrl);
+  if (!res.ok) throw new Error('could not decode photo image data');
+  return await res.blob();
+}
+
+/**
+ * Upload one inspection photo: binary to Supabase Storage, metadata row
+ * (including the photo note) to emg_inspection_photos.
+ *
+ * Idempotent — safe to retry: the storage upload uses upsert and the metadata
+ * insert is skipped when a row already exists for the storage path.
+ * Throws on any failure; the caller keeps the queue item so the photo is
+ * never silently dropped.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function pushPhoto(
+  sb: any,
+  inspectionId: string,
+  photo: PhotoRef,
+): Promise<void> {
+  const storagePath =
+    photo.storage_path ?? `inspections/${inspectionId}/${photo.id}.jpg`;
+  // Already recorded? Skip the insert — retry after a partial failure.
+  const { data: existing } = await sb
+    .from('emg_inspection_photos')
+    .select('id')
+    .eq('storage_path', storagePath)
+    .maybeSingle();
+  if (existing) return;
+  if (!photo.dataUrl) {
+    throw new Error(`photo ${photo.id.slice(0, 8)} has no image data to upload`);
+  }
+  const blob = await dataUrlToBlob(photo.dataUrl);
+  const { error: uploadError } = await sb.storage
+    .from(PHOTO_BUCKET)
+    .upload(storagePath, blob, {
+      upsert: true,
+      contentType: blob.type || 'image/jpeg',
+    });
+  if (uploadError) {
+    const msg = uploadError.message || 'unknown storage error';
+    if (/bucket/i.test(msg) && /not found|does not exist/i.test(msg)) {
+      throw new Error(
+        `photo storage bucket "${PHOTO_BUCKET}" is missing — run ` +
+          `supabase/migrations/010_photo_storage.sql in the Supabase SQL ` +
+          `editor, then sync again. Photo stays queued.`,
+      );
+    }
+    throw new Error(`photo upload failed: ${msg}`);
+  }
+  const { error } = await sb.from('emg_inspection_photos').insert({
+    inspection_id: inspectionId,
+    photo_type: photo.photo_type,
+    storage_path: storagePath,
+    description: photo.description ?? null,
+    taken_at: photo.taken_at,
+  });
+  if (error) throw new Error(error.message);
 }
 
 /** True when the app has unsynced work. Drives the "N pending" badge. */
@@ -170,6 +261,22 @@ export async function pendingCount(): Promise<number> {
     idbGetAll<InspectionDraft>('drafts'),
   ]);
   return q.length + drafts.filter((d) => d.sync_status === 'pending').length;
+}
+
+/** Number of photos awaiting upload: stand-alone 'photo' queue items plus
+ *  photos attached to pending inspection drafts (they ride with the
+ *  inspection push). Drives the "N photos awaiting upload" line in the Sync
+ *  tab. */
+export async function pendingPhotos(): Promise<number> {
+  const [q, drafts] = await Promise.all([
+    idbGetAll<SyncQueueItem>('syncQueue'),
+    idbGetAll<InspectionDraft>('drafts'),
+  ]);
+  const queued = q.filter((i) => i.kind === 'photo').length;
+  const inDrafts = drafts
+    .filter((d) => d.sync_status === 'pending')
+    .reduce((n, d) => n + (d.photos?.length ?? 0), 0);
+  return queued + inDrafts;
 }
 
 /** Clear all items from the sync queue. Use when a stuck item can't be fixed. */

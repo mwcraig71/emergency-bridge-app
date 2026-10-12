@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ClosureType, Roadblock } from '../types';
+import type { ClosureType, Roadblock, SyncQueueItem } from '../types';
 import { getGpsFix } from '../lib/location';
 import { capturePhoto } from '../lib/camera';
 import { idbPut, idbGetAll } from '../lib/idb';
@@ -21,6 +21,20 @@ type PhotoState = {
   dataUrl: string;
   takenAt: string;
 } | null;
+
+/** A roadblock closure photo stored locally in the IndexedDB `photos` store.
+ *  Roadblock photos have no server column (the emg_roadblocks insert omits
+ *  them, matching the inspection-photo "local only" policy), so they persist
+ *  on-device and are shown alongside their roadblock report. */
+type RoadblockPhoto = {
+  id: string;
+  roadblockId: string;
+  dataUrl: string;
+  takenAt: string;
+  createdAt: string;
+};
+
+type PhotoSaveState = 'idle' | 'saved' | 'failed';
 
 type Status = 'idle' | 'submitting' | 'success';
 
@@ -68,12 +82,15 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
   const [gpsLoading, setGpsLoading] = useState<boolean>(false);
   const [gpsError, setGpsError] = useState<string | null>(null);
   const [photo, setPhoto] = useState<PhotoState>(null);
+  const [photoSave, setPhotoSave] = useState<PhotoSaveState>('idle');
+  const [photoError, setPhotoError] = useState<string | null>(null);
   const [status, setStatus] = useState<Status>('idle');
   const [submitError, setSubmitError] = useState<string | null>(null);
 
   const [existing, setExisting] = useState<Roadblock[]>([]);
   const [existingError, setExistingError] = useState<string | null>(null);
-  const [queuedCount, setQueuedCount] = useState<number | null>(null);
+  const [queued, setQueued] = useState<Roadblock[]>([]);
+  const [photoMap, setPhotoMap] = useState<Record<string, string>>({});
   const [expandedId, setExpandedId] = useState<string | null>(null);
 
   const online = useMemo(() => isOnline(), [status]);
@@ -106,12 +123,35 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
     } else {
       setExisting([]);
       try {
-        const items = await idbGetAll<{ kind?: string }>('syncQueue');
-        const n = Array.isArray(items) ? items.filter((i) => i && i.kind === 'roadblock').length : 0;
-        setQueuedCount(n);
+        const items = await idbGetAll<SyncQueueItem>('syncQueue');
+        const roadblocks = Array.isArray(items)
+          ? items
+              .filter((i) => i && i.kind === 'roadblock')
+              .map((i) => i.payload)
+              .filter(
+                (p): p is Roadblock =>
+                  !!p && typeof (p as Roadblock).id === 'string'
+              )
+          : [];
+        setQueued(roadblocks);
       } catch {
-        setQueuedCount(0);
+        setQueued([]);
       }
+    }
+    // Local-only roadblock photos are available in every list view, online
+    // or offline. The photo list itself is best-effort — the per-photo save
+    // in handleSubmit still reports its own failures to the user.
+    try {
+      const photos = await idbGetAll<RoadblockPhoto>('photos');
+      const map: Record<string, string> = {};
+      if (Array.isArray(photos)) {
+        for (const p of photos) {
+          if (p && p.roadblockId && p.dataUrl) map[p.roadblockId] = p.dataUrl;
+        }
+      }
+      setPhotoMap(map);
+    } catch {
+      setPhotoMap({});
     }
   }, [online, configured]);
 
@@ -154,6 +194,8 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
       return;
     }
     setSubmitError(null);
+    setPhotoSave('idle');
+    setPhotoError(null);
     setStatus('submitting');
 
     const id = crypto.randomUUID();
@@ -200,6 +242,10 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
         });
       }
 
+      // Persist the closure photo locally. The 'photos' store exists since
+      // schema v6; a failed write is surfaced to the user — never silently
+      // dropped. The roadblock report itself already succeeded above, so a
+      // photo failure does not fail the submission.
       if (photo) {
         try {
           await idbPut('photos', {
@@ -208,10 +254,18 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
             dataUrl: photo.dataUrl,
             takenAt: photo.takenAt,
             createdAt: reported_at,
-          });
-        } catch {
-          /* photo persistence best-effort */
+          } satisfies RoadblockPhoto);
+          setPhotoSave('saved');
+          setPhotoError(null);
+        } catch (err) {
+          setPhotoSave('failed');
+          setPhotoError(
+            err instanceof Error ? err.message : 'Photo could not be stored on this device'
+          );
         }
+      } else {
+        setPhotoSave('idle');
+        setPhotoError(null);
       }
 
       setStatus('success');
@@ -264,6 +318,18 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
               ? 'Synced to server.'
               : 'Saved offline — will sync when connectivity returns.'}
           </p>
+          {photo ? (
+            photoSave === 'failed' ? (
+              <div className="warn-box">
+                <strong>Photo not saved.</strong>{' '}
+                {photoError ?? 'The closure photo could not be stored on this device.'}{' '}
+                The report itself was submitted — keep the photo in your camera
+                app as a backup.
+              </div>
+            ) : photoSave === 'saved' ? (
+              <p className="muted">Photo saved on this device (not synced to server).</p>
+            ) : null
+          ) : null}
           <button className="btn" type="button" onClick={onDone}>
             Done
           </button>
@@ -401,6 +467,13 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
                     </div>
                     {expanded ? (
                       <div style={{ marginTop: 8 }}>
+                        {photoMap[rb.id] ? (
+                          <img
+                            src={photoMap[rb.id]}
+                            alt="Closure photo"
+                            style={{ maxWidth: 160, borderRadius: 6, marginBottom: 8 }}
+                          />
+                        ) : null}
                         {rb.notes ? <p>{rb.notes}</p> : <p className="muted">No notes.</p>}
                         {active ? (
                           <button
@@ -421,10 +494,32 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
               })}
             </ul>
           )
+        ) : queued.length === 0 ? (
+          <p className="muted">offline — no queued reports</p>
         ) : (
-          <p className="muted">
-            offline — {queuedCount ?? 0} queued
-          </p>
+          <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+            {queued.map((rb) => (
+              <li
+                key={rb.id}
+                style={{ borderBottom: '1px solid #eee', padding: '8px 0' }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                  <strong style={{ flex: 1 }}>{rb.road_name}</strong>
+                  <span className="pill pill-warn">queued</span>
+                </div>
+                <div className="muted" style={{ fontSize: 12 }}>
+                  {closureLabel(rb.closure_type)} · {rb.reporter} · {formatDate(rb.reported_at)}
+                </div>
+                {photoMap[rb.id] ? (
+                  <img
+                    src={photoMap[rb.id]}
+                    alt="Closure photo"
+                    style={{ maxWidth: 160, borderRadius: 6, marginTop: 8 }}
+                  />
+                ) : null}
+              </li>
+            ))}
+          </ul>
         )}
       </div>
 
