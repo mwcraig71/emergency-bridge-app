@@ -16,6 +16,7 @@ import {
 } from '../lib/crashSession';
 import { pushQueue, pendingCount, pendingPhotos, clearQueue } from '../lib/sync';
 import { syncRoadblocks } from '../lib/roadblocks';
+import { startPositionBroadcast, stopPositionBroadcast } from '../lib/teamPositions';
 import {
   syncAssignments,
   syncNotifications,
@@ -44,9 +45,20 @@ import {
 
 type Tab = 'inspect' | 'map' | 'closure' | 'sync';
 
-const FieldApp: React.FC = () => {
+interface FieldAppProps {
+  /**
+   * Inspector name from the login session. When provided it is used
+   * directly and the free-text name input is hidden (no editing).
+   * When absent, the legacy free-text behavior applies.
+   */
+  inspectorName?: string;
+}
+
+const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
   const [tab, setTab] = useState<Tab>('inspect');
-  const [inspectorName, setInspectorName] = useState<string>('');
+  // Session-locked name: sign-in via the login screen, not editable here.
+  const lockedName = (sessionName ?? '').trim();
+  const [inspectorName, setInspectorName] = useState<string>(lockedName);
   const [nameLoaded, setNameLoaded] = useState(false);
   const [activeBridge, setActiveBridge] = useState<Bridge | null>(null);
   const [resumeDraft, setResumeDraft] = useState<InspectionDraft | null>(null);
@@ -88,8 +100,12 @@ const FieldApp: React.FC = () => {
         setTrackPaused(isPaused());
       }
     });
+    // Live team position sharing (30s cadence, 10m threshold, pauses in
+    // background). No-op until the inspector name is set.
+    void startPositionBroadcast();
     return () => {
       cancelled = true;
+      stopPositionBroadcast();
     };
   }, [nameLoaded, inspectorName]);
 
@@ -225,6 +241,14 @@ const FieldApp: React.FC = () => {
 
   useEffect(() => {
     let cancelled = false;
+    if (lockedName) {
+      // Signed in via the login screen: name is fixed, skip the cached lookup.
+      setInspectorName(lockedName);
+      setNameLoaded(true);
+      return () => {
+        cancelled = true;
+      };
+    }
     (async () => {
       try {
         const rec = (await idbGet('settings', 'inspector_name')) as
@@ -248,7 +272,7 @@ const FieldApp: React.FC = () => {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [lockedName]);
 
   useEffect(() => {
     void refreshDrafts();
@@ -373,6 +397,7 @@ const FieldApp: React.FC = () => {
   }, []);
 
   const handleNameChange = (value: string) => {
+    if (lockedName) return; // name is fixed by the login session
     setInspectorName(value);
     if (value.trim()) setNameHint(false);
     void persistName(value);
@@ -834,30 +859,40 @@ const FieldApp: React.FC = () => {
     <div className="screen">
       <div className="card">
         <h3 style={{ marginTop: 0 }}>Settings</h3>
-        <label
-          htmlFor="inspector-name"
-          style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}
-        >
-          Inspector name
-        </label>
-        <input
-          id="inspector-name"
-          className="field"
-          type="text"
-          value={inspectorName}
-          onChange={(e) => handleNameChange(e.target.value)}
-          placeholder="Your name"
-          autoComplete="name"
-          disabled={!nameLoaded}
-          style={{ minHeight: 48, fontSize: 18, width: '100%' }}
-        />
-        {nameHint && (
-          <div
-            role="alert"
-            style={{ marginTop: 8, color: '#7A1F08', fontWeight: 600 }}
-          >
-            Name required before inspecting.
+        {lockedName ? (
+          <div className="muted" style={{ fontSize: 16 }}>
+            Signed in as <strong style={{ color: '#111' }}>{lockedName}</strong>
+            <br />
+            Switch users from the Sign out button above.
           </div>
+        ) : (
+          <>
+            <label
+              htmlFor="inspector-name"
+              style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}
+            >
+              Inspector name
+            </label>
+            <input
+              id="inspector-name"
+              className="field"
+              type="text"
+              value={inspectorName}
+              onChange={(e) => handleNameChange(e.target.value)}
+              placeholder="Your name"
+              autoComplete="name"
+              disabled={!nameLoaded}
+              style={{ minHeight: 48, fontSize: 18, width: '100%' }}
+            />
+            {nameHint && (
+              <div
+                role="alert"
+                style={{ marginTop: 8, color: '#7A1F08', fontWeight: 600 }}
+              >
+                Name required before inspecting.
+              </div>
+            )}
+          </>
         )}
       </div>
       <div className="card">

@@ -1,9 +1,9 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import type { ClosureType, Roadblock, SyncQueueItem } from '../types';
+import type { ClosureType, Roadblock, SyncQueueItem, RoadblockPhoto, RoadblockPhotoQueuePayload } from '../types';
 import { getGpsFix } from '../lib/location';
 import { capturePhoto } from '../lib/camera';
 import { idbPut, idbGetAll } from '../lib/idb';
-import { enqueue } from '../lib/sync';
+import { enqueue, pushRoadblockPhoto, isUuid } from '../lib/sync';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 
 type Props = {
@@ -22,17 +22,9 @@ type PhotoState = {
   takenAt: string;
 } | null;
 
-/** A roadblock closure photo stored locally in the IndexedDB `photos` store.
- *  Roadblock photos have no server column (the emg_roadblocks insert omits
- *  them, matching the inspection-photo "local only" policy), so they persist
- *  on-device and are shown alongside their roadblock report. */
-type RoadblockPhoto = {
-  id: string;
-  roadblockId: string;
-  dataUrl: string;
-  takenAt: string;
-  createdAt: string;
-};
+/** A roadblock closure photo — shared type lives in types.ts. Photos are
+ *  stored locally in the IndexedDB `photos` store and synced to the
+ *  emg-photos bucket + emg_roadblock_photos table when online. */
 
 type PhotoSaveState = 'idle' | 'saved' | 'failed';
 
@@ -106,7 +98,21 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
   const [queued, setQueued] = useState<Roadblock[]>([]);
   const [lastSync, setLastSync] = useState<string | null>(null);
   const [photoMap, setPhotoMap] = useState<Record<string, string>>({});
+  // Server-side photo URLs (signed URLs from the emg-photos bucket), keyed
+  // by roadblock id. Local IndexedDB photos take precedence when present.
+  const [serverPhotoMap, setServerPhotoMap] = useState<Record<string, string>>({});
+  // Outcome of the just-submitted photo: synced now, queued for later, or
+  // local-only (e.g. sync not configured).
+  const [photoSync, setPhotoSync] = useState<'synced' | 'queued' | 'local' | null>(null);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+
+  /** Resolve the best photo for a roadblock: local IndexedDB copy first
+   *  (works offline), server signed URL as fallback (e.g. another device). */
+  const photoSrcFor = useCallback(
+    (roadblockId: string): string | null =>
+      photoMap[roadblockId] ?? serverPhotoMap[roadblockId] ?? null,
+    [photoMap, serverPhotoMap]
+  );
 
   // Reactive online state: recompute on browser online/offline events, not
   // just when the submit status changes (a stale snapshot would queue when
@@ -126,6 +132,44 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
     };
   }, []);
 
+
+  /** Load server-side closure photos for the given roadblock ids and
+   *  resolve signed URLs from the private emg-photos bucket. Local
+   *  IndexedDB photos take display precedence; these fill the gaps
+   *  (e.g. photos taken on another device). Best-effort — never throws. */
+  const loadServerPhotos = useCallback(
+    async (roadblockIds: string[]) => {
+      if (!online || !configured || roadblockIds.length === 0) return;
+      try {
+        const sb = getSupabase();
+        if (!sb) return;
+        const { data, error } = await sb
+          .from('emg_roadblock_photos')
+          .select('roadblock_id, storage_path')
+          .in('roadblock_id', roadblockIds);
+        if (error || !data) return;
+        const map: Record<string, string> = {};
+        for (const row of data as Array<{
+          roadblock_id: string;
+          storage_path: string;
+        }>) {
+          if (!row.storage_path || map[row.roadblock_id]) continue;
+          try {
+            const { data: urlData } = await sb.storage
+              .from('emg-photos')
+              .createSignedUrl(row.storage_path, 3600);
+            if (urlData?.signedUrl) map[row.roadblock_id] = urlData.signedUrl;
+          } catch {
+            // One bad URL must not block the rest.
+          }
+        }
+        setServerPhotoMap(map);
+      } catch {
+        // Best-effort: local photos (if any) still display.
+      }
+    },
+    [online, configured]
+  );
 
   const loadExisting = useCallback(async () => {
     setExistingError(null);
@@ -152,6 +196,9 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
         setExisting(refreshed.slice(0, 50));
         const ts = await getRoadblocksLastSync();
         setLastSync(ts);
+        // Fetch server-side closure photos for the visible roadblocks.
+        // Signed URLs (bucket is private); best-effort, never blocks the list.
+        void loadServerPhotos(refreshed.slice(0, 50).map((r) => r.id));
       } catch (err) {
         // Network refresh failed — cached data (if any) is already shown.
         // Only show error if we have no cached data at all.
@@ -182,9 +229,9 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
     } catch {
       setQueued([]);
     }
-    // Local-only roadblock photos are available in every list view, online
-    // or offline. The photo list itself is best-effort — the per-photo save
-    // in handleSubmit still reports its own failures to the user.
+    // Roadblock photos: local IndexedDB copies are available in every list
+    // view, online or offline. Server copies (from other devices) are
+    // merged in via loadServerPhotos above; local takes precedence.
     try {
       const photos = await idbGetAll<RoadblockPhoto>('photos');
       const map: Record<string, string> = {};
@@ -197,7 +244,7 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
     } catch {
       setPhotoMap({});
     }
-  }, [online, configured]);
+  }, [online, configured, loadServerPhotos]);
 
   useEffect(() => {
     void loadExisting();
@@ -247,6 +294,7 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
     setSubmitError(null);
     setPhotoSave('idle');
     setPhotoError(null);
+    setPhotoSync(null);
     setStatus('submitting');
 
     try {
@@ -266,12 +314,15 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
         reporter: inspectorName,
         reported_at,
       };
+      // Server-side id for the photo FK. When the client id isn't a valid
+      // uuid (non-secure-context fallback), the server generates one and we
+      // read it back.
+      let serverRoadblockId: string | null = null;
 
       if (online && configured) {
         const sb = getSupabase();
         if (!sb) throw new Error('Supabase not configured');
-        const payload = {
-          id: roadblock.id,
+        const payload: Record<string, unknown> = {
           road_name: roadblock.road_name,
           closure_type: roadblock.closure_type,
           status: roadblock.status,
@@ -280,8 +331,15 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
           reported_at: roadblock.reported_at,
           geom: `SRID=4326;POINT(${gps.lon} ${gps.lat})`,
         };
-        const { error } = await sb.from('emg_roadblocks').insert(payload);
+        if (isUuid(id)) payload.id = id;
+        const { data: inserted, error } = await sb
+          .from('emg_roadblocks')
+          .insert(payload)
+          .select('id')
+          .maybeSingle();
         if (error) throw new Error(error.message);
+        serverRoadblockId =
+          (inserted as { id: string } | null)?.id ?? (isUuid(id) ? id : null);
       } else {
         await enqueue('roadblock', {
           id: roadblock.id,
@@ -294,28 +352,65 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
           reporter: roadblock.reporter,
           reported_at: roadblock.reported_at,
         });
+        serverRoadblockId = isUuid(id) ? id : null;
       }
 
-      // Persist the closure photo locally. The 'photos' store exists since
-      // schema v6; a failed write is surfaced to the user — never silently
-      // dropped. The roadblock report itself already succeeded above, so a
-      // photo failure does not fail the submission.
+      // Persist the closure photo locally first (crash-safe), then sync it.
+      // A photo failure never fails the roadblock report itself.
       if (photo) {
+        const localPhoto: RoadblockPhoto = {
+          id: `${id}-photo`,
+          roadblockId: id,
+          dataUrl: photo.dataUrl,
+          takenAt: photo.takenAt,
+          createdAt: reported_at,
+        };
+        let savedLocally = false;
         try {
-          await idbPut('photos', {
-            id: `${id}-photo`,
-            roadblockId: id,
-            dataUrl: photo.dataUrl,
-            takenAt: photo.takenAt,
-            createdAt: reported_at,
-          } satisfies RoadblockPhoto);
+          await idbPut('photos', localPhoto);
           setPhotoSave('saved');
           setPhotoError(null);
+          savedLocally = true;
         } catch (err) {
           setPhotoSave('failed');
           setPhotoError(
             err instanceof Error ? err.message : 'Photo could not be stored on this device'
           );
+        }
+        // Sync the photo when we have a server roadblock id to attach it to.
+        if (savedLocally && serverRoadblockId && online && configured) {
+          try {
+            const sb = getSupabase();
+            if (!sb) throw new Error('Supabase not configured');
+            await pushRoadblockPhoto(sb, serverRoadblockId, localPhoto);
+            setPhotoSync('synced');
+          } catch {
+            // Upload failed — queue for retry on the next sync.
+            try {
+              await enqueue('roadblock_photo', {
+                roadblock_id: serverRoadblockId,
+                photo_id: localPhoto.id,
+                inspector: inspectorName,
+              } satisfies RoadblockPhotoQueuePayload);
+              setPhotoSync('queued');
+            } catch {
+              setPhotoSync('local');
+            }
+          }
+        } else if (savedLocally && serverRoadblockId) {
+          // Offline (or sync not configured): queue the photo for later.
+          try {
+            await enqueue('roadblock_photo', {
+              roadblock_id: serverRoadblockId,
+              photo_id: localPhoto.id,
+              inspector: inspectorName,
+            } satisfies RoadblockPhotoQueuePayload);
+            setPhotoSync('queued');
+          } catch {
+            setPhotoSync('local');
+          }
+        } else if (savedLocally) {
+          setPhotoSync('local');
         }
       } else {
         setPhotoSave('idle');
@@ -400,7 +495,13 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
                 app as a backup.
               </div>
             ) : photoSave === 'saved' ? (
-              <p className="muted">Photo saved on this device (not synced to server).</p>
+              <p className="muted">
+                {photoSync === 'synced'
+                  ? 'Photo synced to server.'
+                  : photoSync === 'queued'
+                    ? 'Photo saved on this device — will upload when connectivity returns.'
+                    : 'Photo saved on this device.'}
+              </p>
             ) : null
           ) : null}
           <button className="btn" type="button" onClick={onDone}>
@@ -550,9 +651,9 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
                     </div>
                     {expanded ? (
                       <div style={{ marginTop: 8 }}>
-                        {photoMap[rb.id] ? (
+                        {photoSrcFor(rb.id) ? (
                           <img
-                            src={photoMap[rb.id]}
+                            src={photoSrcFor(rb.id) as string}
                             alt="Closure photo"
                             style={{ maxWidth: 160, borderRadius: 6, marginBottom: 8 }}
                           />
@@ -593,9 +694,9 @@ export default function RoadblockReport({ inspectorName, onDone }: Props): React
                 <div className="muted" style={{ fontSize: 12 }}>
                   {closureLabel(rb.closure_type)} · {rb.reporter} · {formatDate(rb.reported_at)}
                 </div>
-                {photoMap[rb.id] ? (
+                {photoSrcFor(rb.id) ? (
                   <img
-                    src={photoMap[rb.id]}
+                    src={photoSrcFor(rb.id) as string}
                     alt="Closure photo"
                     style={{ maxWidth: 160, borderRadius: 6, marginTop: 8 }}
                   />

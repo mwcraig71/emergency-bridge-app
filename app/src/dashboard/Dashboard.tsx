@@ -6,6 +6,7 @@ import DataIntake from './DataIntake';
 import UploadNbi from './UploadNbi';
 import AssignmentsPanel from './AssignmentsPanel';
 import TeamMap from '../components/TeamMap';
+import TeamRoster from './TeamRoster';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import { idbGetAll } from '../lib/idb';
 import type { Bridge } from '../types';
@@ -25,12 +26,18 @@ function rating(v: unknown): string {
   return String(v);
 }
 
-export default function Dashboard() {
+export default function Dashboard({
+  firmId,
+  firmName,
+}: {
+  firmId?: string;
+  firmName?: string;
+}) {
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [bridge, setBridge] = useState<Bridge | null>(null);
   const [inspections, setInspections] = useState<BridgeInspection[] | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [view, setView] = useState<'overview' | 'upload' | 'assignments'>('overview');
+  const [view, setView] = useState<'overview' | 'upload' | 'assignments' | 'team'>('overview');
 
   const handleSelectBridge = useCallback((assetId: string) => {
     setSelectedAssetId(assetId);
@@ -130,6 +137,13 @@ export default function Dashboard() {
           >
             Assignments
           </button>
+          <button
+            type="button"
+            className={view === 'team' ? 'active' : ''}
+            onClick={() => setView('team')}
+          >
+            Team roster
+          </button>
         </nav>
       </header>
 
@@ -143,6 +157,12 @@ export default function Dashboard() {
         <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
           <main className="dash-main">
             <AssignmentsPanel />
+          </main>
+        </div>
+      ) : view === 'team' ? (
+        <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <main className="dash-main">
+            <TeamRoster firmId={firmId} firmName={firmName} />
           </main>
         </div>
       ) : (

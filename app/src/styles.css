@@ -176,7 +176,8 @@ h3 { font-size: 16px; margin: 6px 0 8px; font-weight: 500; }
   margin-bottom: 6px; color: var(--ink);
 }
 .field .hint { font-size: 13px; color: var(--muted); margin: -2px 0 6px; }
-.field input[type="text"], .field input[type="number"], .field textarea, .field select {
+.field input[type="text"], .field input[type="password"], .field input[type="email"],
+.field input[type="number"], .field textarea, .field select {
   display: block; width: 100%; min-height: var(--tap); font-size: 16px;
   border: 2px solid var(--line); border-radius: var(--radius);
   padding: 10px 12px; background: #fff; color: var(--ink);
@@ -467,3 +468,73 @@ code, .mono { font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace; 
 .field-grid { display: grid; grid-template-columns: 160px 1fr; gap: 6px 12px; font-size: 14px; }
 .field-grid dt { font-weight: 700; color: var(--muted); }
 .field-grid dd { margin: 0; }
+
+/* ---- Login screen (Strinteg branded) ---- */
+.login-screen {
+  min-height: 100vh; background: #ECECF0;
+  display: flex; flex-direction: column;
+}
+.login-loading { padding: 48px 20px; text-align: center; color: var(--muted); }
+.login-header {
+  background: var(--strinteg-navy); color: #fff;
+  padding: 32px 20px 24px; border-bottom: 3px solid var(--accent);
+}
+.login-header .brandmark {
+  font-family: var(--font-heading); font-weight: 700; font-size: 20px;
+  letter-spacing: 0.06em;
+}
+.login-header .brandmark .str { color: var(--accent); }
+.login-header h1 {
+  font-family: var(--font-heading); font-size: 24px; margin: 10px 0 4px;
+  letter-spacing: 0.02em;
+}
+.login-header p { margin: 0; color: #C9D2E8; font-size: 14px; }
+.login-main {
+  flex: 1; padding: 16px; max-width: 480px; width: 100%; margin: 0 auto;
+}
+.login-main .card { margin-top: -8px; }
+.login-tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.login-tabs button {
+  flex: 1; min-height: var(--tap); border: 2px solid var(--brand);
+  border-radius: var(--radius); background: #fff; color: var(--brand);
+  font-family: var(--font-heading); font-weight: 500; font-size: 15px;
+  letter-spacing: 0.06em; text-transform: uppercase; cursor: pointer;
+}
+.login-tabs button.active { background: var(--brand); color: #fff; }
+.login-note {
+  background: #EAF0FA; border-left: 4px solid var(--brand);
+  padding: 10px 12px; margin: 12px 0; font-size: 14px; border-radius: var(--radius);
+}
+.login-error {
+  background: #FBE7DF; border-left: 4px solid var(--accent);
+  color: #7A1F08; font-weight: 600;
+  padding: 10px 12px; margin: 12px 0; font-size: 14px; border-radius: var(--radius);
+}
+.login-remember {
+  display: flex; align-items: center; gap: 8px;
+  font-size: 14px; margin: 4px 0 12px; cursor: pointer;
+}
+.login-remember input { width: 20px; height: 20px; accent-color: var(--accent); }
+.login-submit { margin-top: 4px; }
+.login-status { margin-top: 10px; }
+
+/* Primary modifier on the base .btn — orange per Strinteg brand. */
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: var(--strinteg-orange-dark); }
+.btn-primary:active { background: var(--strinteg-orange-dark); }
+
+/* Nav: signed-in user label + sign-out (squared brand style). */
+.env-nav .env-user {
+  display: flex; align-items: center;
+  color: #B9C6E8; font-size: 13px;
+  padding: 10px 12px; margin-right: auto; white-space: nowrap;
+}
+.env-nav .env-signout {
+  display: flex; align-items: center; align-self: center;
+  background: transparent; border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: var(--radius); color: #fff; cursor: pointer;
+  font-family: var(--font-heading); font-size: 12px; font-weight: 500;
+  letter-spacing: 0.08em; text-transform: uppercase;
+  padding: 8px 14px; margin: 6px 4px; margin-left: auto;
+}
+.env-nav .env-signout:hover { background: rgba(255, 255, 255, 0.12); }

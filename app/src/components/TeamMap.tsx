@@ -2,6 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Bridge, Roadblock, RoadStatusPin, PathTrack, TeamPosition, DriveNCEvent, DriveNCSign, DriveNCWorkZone } from '../types';
+import {
+  fetchTeamPositions,
+  isPositionStale,
+  inspectorIdForName,
+  getInspectorName,
+  type LiveTeamPosition,
+} from '../lib/teamPositions';
+import { haversineMeters, formatDistance } from '../lib/geo';
 import { createTilePackProvider } from '../lib/tilepacks';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import { idbGetAll } from '../lib/idb';
@@ -307,6 +315,8 @@ export default function TeamMap({
   const gpsMarkerRef = useRef<maplibregl.Marker | null>(null);
   const focusMarkerRef = useRef<maplibregl.Marker | null>(null);
   const routeSourceIdRef = useRef<string | null>(null);
+  /** Latest self position for the team popup's distance readout. */
+  const positionRef = useRef<{ lon: number; lat: number } | null>(null);
   const [recency, setRecency] = useState<Recency>('all');
   const [styleError, setStyleError] = useState<boolean>(false);
   const [ready, setReady] = useState<boolean>(false);
@@ -356,6 +366,8 @@ export default function TeamMap({
     statusPins: RoadStatusPin[];
     paths: PathTrack[];
     team: TeamPosition[];
+    /** Live team positions from fetchTeamPositions() (new schema). */
+    liveTeam: LiveTeamPosition[];
     triageByAsset: Map<string, string>;
     drivencEvents: DriveNCEvent[];
     drivencSigns: DriveNCSign[];
@@ -366,6 +378,7 @@ export default function TeamMap({
     statusPins: [],
     paths: [],
     team: [],
+    liveTeam: [],
     triageByAsset: new Map(),
     drivencEvents: [],
     drivencSigns: [],
@@ -377,6 +390,9 @@ export default function TeamMap({
   const [showDriveNCEvents, setShowDriveNCEvents] = useState(true);
   const [showDriveNCSigns, setShowDriveNCSigns] = useState(true);
   const [showDriveNCWorkzones, setShowDriveNCWorkzones] = useState(true);
+  // Live team positions toggle — default ON. Teammates render as colored
+  // initial markers (orange = you, navy = teammates, gray = stale > 15 min).
+  const [showTeamPositions, setShowTeamPositions] = useState(true);
   const showDriveNCEventsRef = useRef(true);
   const showDriveNCSignsRef = useRef(true);
   const showDriveNCWorkzonesRef = useRef(true);
@@ -975,7 +991,7 @@ export default function TeamMap({
           type: 'symbol',
           source: 'team',
           layout: {
-            'text-field': ['get', 'initial'],
+            'text-field': ['get', 'initials'],
             'text-size': 10,
             'text-font': ['Open Sans Regular', 'Noto Sans Regular'],
             'text-allow-overlap': true,
@@ -994,16 +1010,28 @@ export default function TeamMap({
               ? (f.geometry.coordinates as [number, number])
               : null;
           if (!coords) return;
+          const name =
+            escapeText(p.inspector_name) || escapeText(p.inspector) || 'Team member';
+          const stale = p.stale === '1';
+          const rows: Array<[string, string]> = [
+            ['Updated', timeAgo(p.updated_at)],
+          ];
+          if (stale) rows.push(['Status', 'stale (> 15 min)']);
+          if (p.is_self === '1') rows.push(['This is', 'you']);
+          // Distance from the current user when their position is known.
+          const selfPos = positionRef.current;
+          if (selfPos) {
+            const d = haversineMeters(
+              selfPos.lat,
+              selfPos.lon,
+              coords[1],
+              coords[0],
+            );
+            rows.push(['Distance', formatDistance(d)]);
+          }
           new maplibregl.Popup({ closeButton: true })
             .setLngLat(coords)
-            .setDOMContent(
-              buildPopup(escapeText(p.inspector) || 'Team member', [
-                ['Updated', timeAgo(p.updated_at)],
-                ['Assignment', escapeText(p.assignment)],
-                ['Completed', escapeText(p.completed_count)],
-                ['Pending', escapeText(p.pending_count)],
-              ]),
-            )
+            .setDOMContent(buildPopup(name, rows))
             .addTo(map);
         });
         map.on('mouseenter', 'team-circle', () => {
@@ -1279,17 +1307,23 @@ export default function TeamMap({
         // ignore
       }
 
-      // Team
+      // Team — live positions (firm-scoped), annotated with is_self + stale.
       if (showTeam) {
         try {
-          const { data } = await supabase
-            .from('emg_team_positions')
-            .select(
-              'inspector,lon,lat,updated_at,assignment,completed_count,pending_count',
-            )
-            .limit(500);
-          if (!cancelled && Array.isArray(data)) {
-            store.team = data as unknown as TeamPosition[];
+          const positions = await fetchTeamPositions();
+          if (!cancelled) {
+            // Keep the legacy store.team shape working for any other
+            // readers, but drive the map from the live positions.
+            store.team = positions.map((p) => ({
+              inspector: p.inspector_name || p.inspector_id,
+              lon: p.lon,
+              lat: p.lat,
+              updated_at: p.updated_at,
+              assignment: null,
+              completed_count: 0,
+              pending_count: 0,
+            })) as unknown as TeamPosition[];
+            store.liveTeam = positions;
           }
         } catch {
           // ignore
@@ -1552,44 +1586,56 @@ export default function TeamMap({
         });
       }
 
-      // Team
-      const teamFeatures = showTeam
-        ? store.team
-            .filter((t) => withinRecency(t.updated_at, sel))
-            .map((t) => {
-              const lon = t.lon;
-              const lat = t.lat;
-              if (
-                typeof lon !== 'number' ||
-                typeof lat !== 'number' ||
-                !Number.isFinite(lon) ||
-                !Number.isFinite(lat)
-              )
-                return null;
-              const stale = isStale(t.updated_at);
-              const initial = (t.inspector || '?')
-                .trim()
-                .charAt(0)
-                .toUpperCase();
-              return {
-                type: 'Feature' as const,
-                geometry: {
-                  type: 'Point' as const,
-                  coordinates: [lon, lat] as [number, number],
-                },
-                properties: {
-                  inspector: t.inspector ?? '',
-                  assignment: t.assignment ?? '',
-                  completed_count: t.completed_count ?? '',
-                  pending_count: t.pending_count ?? '',
-                  updated_at: t.updated_at ?? '',
-                  initial,
-                  color: stale ? '#B9C6E8' : '#0ea5e9',
-                },
-              };
-            })
-            .filter((x): x is NonNullable<typeof x> => x != null)
-        : [];
+      // Team — live positions. Orange = you, navy = teammates, gray = stale
+      // (> 15 min). Controlled by the "Team positions" toggle (default ON).
+      const teamFeatures =
+        showTeam && showTeamPositions
+          ? store.liveTeam
+              .filter((t) => withinRecency(t.updated_at, sel))
+              .map((t) => {
+                const lon = t.lon;
+                const lat = t.lat;
+                if (
+                  typeof lon !== 'number' ||
+                  typeof lat !== 'number' ||
+                  !Number.isFinite(lon) ||
+                  !Number.isFinite(lat)
+                )
+                  return null;
+                const stale = t.stale ?? isPositionStale(t.updated_at);
+                const name = (t.inspector_name || t.inspector_id || '?').trim();
+                // Initials: first letters of first + last name parts.
+                const parts = name.split(/\s+/).filter(Boolean);
+                const initials = (
+                  parts.length > 1
+                    ? parts[0].charAt(0) + parts[parts.length - 1].charAt(0)
+                    : name.slice(0, 2)
+                ).toUpperCase();
+                return {
+                  type: 'Feature' as const,
+                  geometry: {
+                    type: 'Point' as const,
+                    coordinates: [lon, lat] as [number, number],
+                  },
+                  properties: {
+                    inspector_id: t.inspector_id ?? '',
+                    inspector_name: name,
+                    is_self: t.is_self ? '1' : '',
+                    stale: stale ? '1' : '',
+                    updated_at: t.updated_at ?? '',
+                    initials,
+                    // Strinteg orange for you, navy for teammates,
+                    // gray for stale positions.
+                    color: stale
+                      ? '#9AA0A6'
+                      : t.is_self
+                        ? '#CF3910'
+                        : '#001A52',
+                  },
+                };
+              })
+              .filter((x): x is NonNullable<typeof x> => x != null)
+          : [];
       const tSrc = map.getSource('team') as
         | maplibregl.GeoJSONSource
         | undefined;
@@ -1604,9 +1650,10 @@ export default function TeamMap({
     return () => {
       cancelled = true;
     };
-  }, [ready, recency, showTeam]);
+  }, [ready, recency, showTeam, showTeamPositions]);
 
-  // Re-apply DriveNC layer visibility when toggles change (no data re-fetch).
+  // Re-apply DriveNC + team layer visibility when toggles change
+  // (no data re-fetch).
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !ready) return;
@@ -1622,7 +1669,9 @@ export default function TeamMap({
     apply('drivenc-events-circle', showDriveNCEvents);
     apply('drivenc-signs-square', showDriveNCSigns);
     apply('drivenc-workzones-line', showDriveNCWorkzones);
-  }, [ready, showDriveNCEvents, showDriveNCSigns, showDriveNCWorkzones]);
+    apply('team-circle', showTeamPositions);
+    apply('team-label', showTeamPositions);
+  }, [ready, showDriveNCEvents, showDriveNCSigns, showDriveNCWorkzones, showTeamPositions]);
 
   // Re-apply the bridge layer when the assignment filter changes (toggle or
   // assignments refresh) without re-running the full data fetch.
@@ -1720,6 +1769,11 @@ export default function TeamMap({
       });
     }
   }, [focusBridge, ready, position]);
+
+  // Keep the latest self position for the team popup's distance readout.
+  useEffect(() => {
+    positionRef.current = position ?? null;
+  }, [position]);
 
   // GPS dot
   useEffect(() => {
@@ -1878,6 +1932,38 @@ export default function TeamMap({
             </span>
           </label>
         ))}
+        {/* Live team positions — orange = you, navy = teammates */}
+        <div
+          style={{
+            fontWeight: 700,
+            fontSize: 11,
+            color: '#BDC1C6',
+            marginTop: 4,
+            borderTop: '1px solid #3D5B96',
+            paddingTop: 6,
+          }}
+        >
+          Team
+        </div>
+        <label
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            cursor: 'pointer',
+            minHeight: 28,
+          }}
+        >
+          <input
+            type="checkbox"
+            checked={showTeamPositions}
+            onChange={(e) => setShowTeamPositions(e.target.checked)}
+            style={{ width: 18, height: 18, accentColor: '#CF3910' }}
+          />
+          <span style={{ color: showTeamPositions ? '#FFFFFF' : '#9AA0A6' }}>
+            Team positions
+          </span>
+        </label>
       </div>
 
       {/* Offline map download button (field app) */}
@@ -1937,7 +2023,9 @@ export default function TeamMap({
           ['#16a34a', 'Complete / passable'],
           ['#B9C6E8', 'Not started'],
           ['#dc2626', 'Roadblock (active)'],
-          ['#0ea5e9', 'Team active'],
+          ['#CF3910', 'You (live position)'],
+          ['#001A52', 'Teammate'],
+          ['#9AA0A6', 'Teammate (stale > 15 min)'],
           ['#9AA0A6', 'NCDOT event (secondary)'],
           ['#BDC1C6', 'NCDOT sign (secondary)'],
         ].map(([c, label]) => (

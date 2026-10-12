@@ -1,9 +1,9 @@
 // Local-first sync: queue mutations in IndexedDB, push to Supabase when online.
 // Server merge rule: dedupe by client_inspection_id + timestamp, newest wins.
 import { getSupabase, isSupabaseConfigured, isOnline } from './supabase';
-import { idbGetAll, idbPut, idbDelete } from './idb';
+import { idbGetAll, idbPut, idbDelete, idbGet } from './idb';
 import { getCurrentFirmId } from './firm';
-import type { InspectionDraft, Roadblock, SyncQueueItem, PhotoRef } from '../types';
+import type { InspectionDraft, Roadblock, SyncQueueItem, PhotoRef, RoadblockPhoto, RoadblockPhotoQueuePayload } from '../types';
 
 function uuid(): string {
   return crypto.randomUUID();
@@ -32,12 +32,15 @@ export async function pushQueue(): Promise<{
   const sb = getSupabase();
   if (!sb || !isOnline()) return { pushed: 0, failed: 0, errors: [] };
   const items = await idbGetAll<SyncQueueItem>('syncQueue');
-  // Inspections must push before their photos: process 'inspection' items
-  // first, then everything else in enqueue order. (Queue keys are random
-  // UUIDs, so raw IndexedDB order is arbitrary.)
+  // Ordering: inspections first (photos ride with them), then roadblocks
+  // (their photos ride with them / follow as roadblock_photo items), then
+  // everything else in enqueue order. (Queue keys are random UUIDs, so raw
+  // IndexedDB order is arbitrary.)
+  const kindRank = (k: SyncQueueItem['kind']) =>
+    k === 'inspection' ? 0 : k === 'roadblock' ? 1 : 2;
   items.sort(
     (a, b) =>
-      (a.kind === 'inspection' ? 0 : 1) - (b.kind === 'inspection' ? 0 : 1) ||
+      kindRank(a.kind) - kindRank(b.kind) ||
       a.created_at.localeCompare(b.created_at),
   );
   let pushed = 0;
@@ -148,7 +151,11 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
     }
     case 'roadblock': {
       const b = item.payload as Roadblock & { photoDataUrl?: string };
-      const { error } = await sb.from('emg_roadblocks').insert({
+      // Upsert (not insert) so a retry after a partial failure — e.g. the
+      // roadblock row landed but a photo upload failed — doesn't create a
+      // duplicate. The client-generated id is preserved when it's a valid
+      // uuid, so queued photos can reference the server row.
+      const row: Record<string, unknown> = {
         road_name: b.road_name,
         closure_type: b.closure_type,
         geom: `SRID=4326;POINT(${b.lon} ${b.lat})`,
@@ -158,8 +165,49 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
         reopened_at: b.reopened_at,
         reopened_by: b.reopened_by,
         notes: b.notes,
-      });
+      };
+      if (isUuid(b.id)) row.id = b.id;
+      const { data: rbRow, error } = await sb
+        .from('emg_roadblocks')
+        .upsert(row, { onConflict: 'id' })
+        .select('id')
+        .maybeSingle();
       if (error) throw new Error(error.message);
+      const serverRoadblockId =
+        (rbRow as { id: string } | null)?.id ?? (isUuid(b.id) ? b.id : null);
+      // Photos ride with the roadblock: push any unsynced local photos for
+      // this roadblock now that the server row exists. pushRoadblockPhoto is
+      // idempotent; a failure keeps this item queued so nothing is dropped.
+      if (serverRoadblockId) {
+        const localPhotos = await idbGetAll<RoadblockPhoto>('photos');
+        for (const p of localPhotos) {
+          if (p.roadblockId === b.id && !p.syncedAt) {
+            try {
+              await pushRoadblockPhoto(sb, serverRoadblockId, p);
+            } catch (e) {
+              const msg = e instanceof Error ? e.message : String(e);
+              throw new Error(`roadblock photo (${p.id.slice(0, 8)}): ${msg}`);
+            }
+          }
+        }
+      }
+      break;
+    }
+    case 'roadblock_photo': {
+      // Stand-alone roadblock photo (e.g. the report was submitted online
+      // but its photo upload failed, or a photo was captured later). The
+      // image bytes stay in the IndexedDB `photos` store; this item only
+      // references them.
+      const p = item.payload as RoadblockPhotoQueuePayload;
+      const local = await idbGet<RoadblockPhoto>('photos', p.photo_id);
+      if (!local) break; // photo deleted locally — drop the item
+      if (local.syncedAt && local.storagePath) break; // already synced
+      try {
+        await pushRoadblockPhoto(sb, p.roadblock_id, local);
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
+        throw new Error(`roadblock photo (${p.photo_id.slice(0, 8)}): ${msg}`);
+      }
       break;
     }
     case 'photo': {
@@ -334,6 +382,95 @@ async function pushPhoto(
   if (error) throw new Error(error.message);
 }
 
+/** True for a canonical uuid string — guards against the non-uuid
+ *  Math.random fallback id used in non-secure contexts. Exported for the
+ *  roadblock report screen, which preserves client ids on direct insert. */
+export function isUuid(s: unknown): s is string {
+  return (
+    typeof s === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(s)
+  );
+}
+
+/**
+ * Upload one roadblock closure photo: binary to the emg-photos bucket under
+ * `roadblocks/<roadblockId>/`, metadata row to emg_roadblock_photos.
+ *
+ * Mirrors pushPhoto: idempotent (skips when a row already exists for the
+ * storage path), marks the local IndexedDB record synced on success.
+ * Throws on any failure; the caller keeps the queue item so the photo is
+ * never silently dropped.
+ */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function pushRoadblockPhoto(
+  sb: any,
+  roadblockId: string,
+  photo: RoadblockPhoto,
+): Promise<void> {
+  const storagePath =
+    photo.storagePath ?? `roadblocks/${roadblockId}/${photo.id}.jpg`;
+  // Already recorded? Mark local synced and skip — retry after partial failure.
+  const { data: existing } = await sb
+    .from('emg_roadblock_photos')
+    .select('id')
+    .eq('storage_path', storagePath)
+    .maybeSingle();
+  if (existing) {
+    await markRoadblockPhotoSynced(photo.id, storagePath);
+    return;
+  }
+  if (!photo.dataUrl) {
+    throw new Error(
+      `roadblock photo ${photo.id.slice(0, 8)} has no image data to upload`
+    );
+  }
+  const blob = await dataUrlToBlob(photo.dataUrl);
+  const { error: uploadError } = await sb.storage
+    .from(PHOTO_BUCKET)
+    .upload(storagePath, blob, {
+      upsert: true,
+      contentType: blob.type || 'image/jpeg',
+    });
+  if (uploadError) {
+    const msg = uploadError.message || 'unknown storage error';
+    if (/bucket/i.test(msg) && /not found|does not exist/i.test(msg)) {
+      throw new Error(
+        `photo storage bucket "${PHOTO_BUCKET}" is missing — run ` +
+          `supabase/migrations/010_photo_storage.sql in the Supabase SQL ` +
+          `editor, then sync again. Photo stays queued.`
+      );
+    }
+    throw new Error(`roadblock photo upload failed: ${msg}`);
+  }
+  const { error } = await sb.from('emg_roadblock_photos').insert({
+    roadblock_id: roadblockId,
+    storage_path: storagePath,
+    note: photo.note ?? null,
+    taken_at: photo.takenAt,
+  });
+  if (error) throw new Error(error.message);
+  await markRoadblockPhotoSynced(photo.id, storagePath);
+}
+
+/** Mark a local roadblock photo as synced (best-effort; never throws). */
+async function markRoadblockPhotoSynced(
+  photoId: string,
+  storagePath: string
+): Promise<void> {
+  try {
+    const rec = await idbGet<RoadblockPhoto>('photos', photoId);
+    if (rec) {
+      await idbPut('photos', {
+        ...rec,
+        storagePath,
+        syncedAt: new Date().toISOString(),
+      });
+    }
+  } catch {
+    // Non-fatal: the server row exists, so the next push is idempotent.
+  }
+}
+
 /** True when the app has unsynced work. Drives the "N pending" badge. */
 export async function pendingCount(): Promise<number> {
   const [q, drafts] = await Promise.all([
@@ -343,16 +480,18 @@ export async function pendingCount(): Promise<number> {
   return q.length + drafts.filter((d) => d.sync_status === 'pending').length;
 }
 
-/** Number of photos awaiting upload: stand-alone 'photo' queue items plus
- *  photos attached to pending inspection drafts (they ride with the
- *  inspection push). Drives the "N photos awaiting upload" line in the Sync
- *  tab. */
+/** Number of photos awaiting upload: stand-alone 'photo' and
+ *  'roadblock_photo' queue items plus photos attached to pending inspection
+ *  drafts (they ride with the inspection push). Drives the "N photos
+ *  awaiting upload" line in the Sync tab. */
 export async function pendingPhotos(): Promise<number> {
   const [q, drafts] = await Promise.all([
     idbGetAll<SyncQueueItem>('syncQueue'),
     idbGetAll<InspectionDraft>('drafts'),
   ]);
-  const queued = q.filter((i) => i.kind === 'photo').length;
+  const queued = q.filter(
+    (i) => i.kind === 'photo' || i.kind === 'roadblock_photo'
+  ).length;
   const inDrafts = drafts
     .filter((d) => d.sync_status === 'pending')
     .reduce((n, d) => n + (d.photos?.length ?? 0), 0);

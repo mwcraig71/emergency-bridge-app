@@ -2,17 +2,19 @@
 //
 // Model (migration 009):
 //   firms         — tenants; each firm owns groups of bridges.
-//   inspectors    — per-firm roster (name + pin_hash for the future offline
-//                   PIN login; the hash is NEVER selected by clients).
+//   inspectors    — per-firm roster (name + pin_hash for the offline PIN
+//                   login; the hash is selected and cached so verification
+//                   works with zero network calls).
 //   firm_bridges  — mapping of shared NBI bridges to firms.
 //
-// Auth plan (not built yet):
-//   * Firm login: secure, online (future login UI).
-//   * Inspector login: MUST work offline — roster cached on device, PIN
-//     verified locally. Guaranteed access, no network dependency.
+// Auth (built — see lib/auth.ts + components/LoginScreen.tsx):
+//   * Firm admin login: Supabase Auth email+password (online only).
+//   * Inspector login: 4–8 digit PIN verified locally against the cached
+//     roster. Works offline — guaranteed access, no network dependency.
 //
-// Until the login UI exists, getCurrentFirmId() returns null and every
-// query behaves exactly as today (no firm filtering).
+// When no session exists, App.tsx gates on the login screen; after an
+// inspector sign-in, getCurrentFirmId() returns the signed-in firm and every
+// firm-scoped query filters to it.
 import { getSupabase, isSupabaseConfigured } from './supabase';
 import { idbBulkPut, idbGetAll } from './idb';
 import type { Firm, Inspector } from '../types';
@@ -20,8 +22,14 @@ import type { Firm, Inspector } from '../types';
 const FIRM_ID_STORAGE_KEY = 'emg.firm_id';
 
 const FIRM_SELECT = 'id,name,created_at';
-// NOTE: pin_hash is deliberately never selected by clients.
-const INSPECTOR_SELECT = 'id,firm_id,name,created_at';
+// The salted SHA-256 PIN hash IS selected by clients: it is cached in
+// IndexedDB so offline inspector login can verify PINs with zero network
+// calls (see lib/auth.ts). The salt is the inspector id (stored in the same
+// row), so the hash never exposes the plaintext PIN — never log, display,
+// or transmit plaintext PINs. TODO: tighten RLS to column-level grants
+// (deny pin_hash to anon) once the auth model matures; RLS is `using (true)`
+// open today so roster syncs can read it.
+const INSPECTOR_SELECT = 'id,firm_id,name,pin_hash,created_at';
 
 /**
  * The currently active firm, or null when no firm is selected
@@ -78,8 +86,8 @@ export async function syncFirms(): Promise<Firm[]> {
 }
 
 /**
- * Download a firm's inspector roster into the IndexedDB `inspectors` store.
- * This is what the future offline PIN login will verify against.
+ * Download a firm's inspector roster into the IndexedDB `inspectors` store,
+ * INCLUDING pin_hash (needed for offline PIN verification — see lib/auth.ts).
  * Pass an explicit firmId or rely on the current firm; no-op when unset.
  */
 export async function syncInspectors(
@@ -99,6 +107,7 @@ export async function syncInspectors(
     id: String(r.id),
     firm_id: String(r.firm_id),
     name: String(r.name ?? ''),
+    pin_hash: r.pin_hash ? String(r.pin_hash) : null,
     created_at: String(r.created_at ?? ''),
   }));
   // Replace the cached roster for this firm.

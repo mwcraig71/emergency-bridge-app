@@ -188,10 +188,33 @@ export interface TeamPosition {
 
 export interface SyncQueueItem {
   id: string;
-  kind: 'inspection' | 'roadblock' | 'road_status' | 'track' | 'position' | 'photo';
+  kind: 'inspection' | 'roadblock' | 'road_status' | 'track' | 'position' | 'photo' | 'roadblock_photo';
   payload: unknown;
   attempts: number;
   created_at: string;
+}
+
+/** A roadblock closure photo. Stored in the IndexedDB `photos` store
+ *  (keyPath 'id' is `${roadblockId}-photo`); synced to the emg-photos
+ *  storage bucket + emg_roadblock_photos table when online. */
+export interface RoadblockPhoto {
+  id: string;
+  roadblockId: string;
+  dataUrl: string;
+  takenAt: string;
+  createdAt: string;
+  note?: string;
+  /** Set once the photo has been uploaded + recorded server-side. */
+  storagePath?: string | null;
+  syncedAt?: string | null;
+}
+
+/** Payload for a queued 'roadblock_photo' item. The image bytes stay in the
+ *  IndexedDB `photos` store; the queue item only references them. */
+export interface RoadblockPhotoQueuePayload {
+  roadblock_id: string;
+  photo_id: string;
+  inspector: string;
 }
 
 export type AssignmentStatus = 'assigned' | 'in_progress' | 'complete';
@@ -235,12 +258,14 @@ export interface Firm {
 }
 
 /** Inspector roster entry for a firm (inspectors table).
- *  pin_hash is never exposed to clients — roster syncs select explicit
- *  columns only (see lib/firm.ts). */
+ *  pin_hash is the salted (inspector id) SHA-256 PIN hash. It IS synced to
+ *  the client roster cache so offline PIN login can verify without network
+ *  (see lib/auth.ts) — never store or transmit the plaintext PIN. */
 export interface Inspector {
   id: string;
   firm_id: string;
   name: string;
+  pin_hash?: string | null;
   created_at: string;
 }
 
