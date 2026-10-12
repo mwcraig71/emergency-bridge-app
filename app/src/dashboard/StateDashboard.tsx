@@ -222,7 +222,8 @@ export default function StateDashboard() {
   return (
     <div className="dash">
       <header className="dash-header">
-        <h1>Emergency Bridge Inspection — State Dashboard</h1>
+        <div className="eyebrow">State operations</div>
+        <h1>Emergency Bridge Inspection</h1>
         <nav className="dash-tabs" aria-label="State dashboard views">
           <button
             type="button"
@@ -384,7 +385,7 @@ export default function StateDashboard() {
                                     style={{
                                       width: `${p.pctComplete}%`,
                                       height: '100%',
-                                      background: '#38bdf8',
+                                      background: '#CF3910',
                                     }}
                                   />
                                 </div>
@@ -736,204 +737,6 @@ export default function StateDashboard() {
           </aside>
         </div>
       )}
-
-      <style>{`
-        .dash {
-          display: flex;
-          flex-direction: column;
-          min-height: 100vh;
-          background: #0f172a;
-          color: #e2e8f0;
-          font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        }
-        .dash-header {
-          padding: 16px 20px;
-          border-bottom: 1px solid #1e293b;
-          background: #111827;
-        }
-        .dash-header h1 {
-          margin: 0;
-          font-size: 18px;
-          font-weight: 600;
-          letter-spacing: 0.01em;
-        }
-        .dash-tabs {
-          display: flex;
-          gap: 8px;
-          margin-top: 10px;
-        }
-        .dash-tabs button {
-          background: transparent;
-          color: #94a3b8;
-          border: 1px solid #334155;
-          border-radius: 6px;
-          padding: 6px 14px;
-          font-size: 13px;
-          cursor: pointer;
-        }
-        .dash-tabs button.active {
-          background: #1e3a5f;
-          color: #e2e8f0;
-          border-color: #38bdf8;
-        }
-        .dash-tabs button:hover {
-          color: #e2e8f0;
-        }
-        .dash .btn {
-          display: inline-block;
-          width: auto;
-          min-height: 0;
-          font-size: 14px;
-          padding: 8px 16px;
-          background: transparent;
-          color: #e2e8f0;
-          border: 1px solid #475569;
-          border-radius: 6px;
-          cursor: pointer;
-        }
-        .dash .btn:hover {
-          background: #334155;
-        }
-        .dash .btn:disabled {
-          opacity: 0.5;
-          cursor: default;
-        }
-        .dash .btn-primary {
-          background: #2563eb;
-          border-color: #2563eb;
-        }
-        .dash .btn-primary:hover {
-          background: #1d4ed8;
-        }
-        .dash select, .dash input[type="text"], .dash textarea {
-          background: #0f172a;
-          color: #e2e8f0;
-          border: 1px solid #475569;
-          border-radius: 6px;
-          padding: 6px 10px;
-          font-size: 14px;
-        }
-        .dash code {
-          background: #0f172a;
-          padding: 1px 5px;
-          border-radius: 4px;
-          font-size: 12px;
-        }
-        .dash-grid {
-          display: grid;
-          grid-template-columns: 1fr 380px;
-          gap: 16px;
-          padding: 16px;
-          flex: 1;
-          align-items: start;
-        }
-        .dash-main {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          min-width: 0;
-        }
-        .dash-sidebar {
-          display: flex;
-          flex-direction: column;
-          gap: 16px;
-          min-width: 0;
-        }
-        .dash .card {
-          background: #1e293b;
-          border: 1px solid #334155;
-          border-radius: 10px;
-          padding: 14px;
-          box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3);
-        }
-        .dash .card h2 {
-          margin: 12px 0 8px;
-          font-size: 14px;
-          font-weight: 600;
-          color: #cbd5e1;
-        }
-        .stat-grid {
-          display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-          gap: 12px;
-        }
-        .stat-card {
-          padding: 12px !important;
-        }
-        .stat-label {
-          font-size: 11px;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: #94a3b8;
-          margin-bottom: 4px;
-        }
-        .stat-value {
-          font-size: 22px;
-          font-weight: 700;
-          color: #e2e8f0;
-        }
-        .field-grid {
-          display: grid;
-          grid-template-columns: repeat(3, minmax(0, 1fr));
-          gap: 10px 16px;
-          margin: 0 0 16px;
-        }
-        .field-grid > div {
-          min-width: 0;
-        }
-        .field-grid dt {
-          font-size: 11px;
-          text-transform: uppercase;
-          letter-spacing: 0.05em;
-          color: #94a3b8;
-          margin-bottom: 2px;
-        }
-        .field-grid dd {
-          margin: 0;
-          font-size: 13px;
-          color: #e2e8f0;
-          word-break: break-word;
-        }
-        .muted {
-          color: #94a3b8;
-          font-size: 13px;
-        }
-        table.data {
-          width: 100%;
-          border-collapse: collapse;
-          font-size: 13px;
-        }
-        table.data th,
-        table.data td {
-          text-align: left;
-          padding: 6px 8px;
-          border-bottom: 1px solid #334155;
-        }
-        table.data th {
-          color: #94a3b8;
-          font-weight: 600;
-          font-size: 12px;
-          text-transform: uppercase;
-          letter-spacing: 0.04em;
-        }
-        table.data tbody tr:hover {
-          background: #273549;
-        }
-        .pill {
-          display: inline-block;
-          padding: 2px 8px;
-          border-radius: 999px;
-          font-size: 11px;
-          font-weight: 600;
-          background: #334155;
-          color: #e2e8f0;
-        }
-        .pill-destroyed { background: #7f1d1d; }
-        .pill-likely_destroyed { background: #92400e; }
-        .pill-revisit { background: #854d0e; }
-        .pill-ground_followup { background: #1e40af; }
-        .pill-complete { background: #166534; }
-      `}</style>
-    </div>
+</div>
   );
 }
