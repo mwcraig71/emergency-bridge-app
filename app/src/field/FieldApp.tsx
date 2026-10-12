@@ -4,6 +4,7 @@ import TriageFlow from './TriageFlow';
 import RoadblockReport from './RoadblockReport';
 import DirectionsView from './DirectionsView';
 import TeamMap from '../components/TeamMap';
+import Icon from '../components/Icon';
 import type { Bridge, InspectionDraft, ActiveSession, Assignment, AppNotification } from '../types';
 import { idbGetAll, idbPut, idbGet, idbDelete } from '../lib/idb';
 import { pushQueue, pendingCount, clearQueue } from '../lib/sync';
@@ -406,17 +407,17 @@ const FieldApp: React.FC = () => {
 
   const triagePillColor = (triage: string): string => {
     const t = triage.toUpperCase();
-    if (t.includes('PASS') || t === 'GREEN' || t === 'OK') return '#1b5e20';
-    if (t.includes('MONITOR') || t === 'YELLOW') return '#a66a00';
+    if (t.includes('PASS') || t === 'GREEN' || t === 'OK') return '#2E7D32';
+    if (t.includes('MONITOR') || t === 'YELLOW') return '#C9A227';
     if (t.includes('FAIL') || t === 'RED' || t.includes('CLOS'))
-      return '#b00020';
-    return '#555';
+      return '#7A1F08';
+    return '#5A5A5A';
   };
 
   const assignmentPillColor = (status: Assignment['status']): string => {
-    if (status === 'complete') return '#1b5e20';
-    if (status === 'in_progress') return '#a66a00';
-    return '#0b57d0';
+    if (status === 'complete') return '#2E7D32';
+    if (status === 'in_progress') return '#C9A227';
+    return '#001A52';
   };
 
   /** Tap a row in "My bridges": resolve the bridge record, then inspect. */
@@ -457,8 +458,8 @@ const FieldApp: React.FC = () => {
             className="card"
             role="alert"
             style={{
-              background: '#fff8e1',
-              border: '2px solid #ffb300',
+              background: '#FBE7DF',
+              border: '2px solid #CF3910',
               marginBottom: 12,
             }}
           >
@@ -478,8 +479,8 @@ const FieldApp: React.FC = () => {
                   minHeight: 52,
                   fontWeight: 700,
                   fontSize: 16,
-                  background: '#ffb300',
-                  color: '#222',
+                  background: '#CF3910',
+                  color: '#fff',
                 }}
               >
                 Resume
@@ -498,7 +499,7 @@ const FieldApp: React.FC = () => {
           <div
             className="card"
             role="alert"
-            style={{ color: '#b00020', fontWeight: 600 }}
+            style={{ color: '#7A1F08', fontWeight: 600 }}
           >
             Enter your inspector name before starting an inspection.
           </div>
@@ -544,7 +545,7 @@ const FieldApp: React.FC = () => {
                       style={{
                         background: assignmentPillColor(a.status),
                         color: '#fff',
-                        borderRadius: 999,
+                        borderRadius: 2,
                         padding: '2px 10px',
                         fontSize: 12,
                         fontWeight: 700,
@@ -600,7 +601,7 @@ const FieldApp: React.FC = () => {
                       style={{
                         background: triagePillColor(row.triage),
                         color: '#fff',
-                        borderRadius: 999,
+                        borderRadius: 2,
                         padding: '2px 10px',
                         fontSize: 12,
                         fontWeight: 700,
@@ -631,7 +632,7 @@ const FieldApp: React.FC = () => {
                       fontSize: 20,
                     }}
                   >
-                    ➤
+                    <Icon name="navigation" size={22} />
                   </button>
                 </li>
               ))}
@@ -657,24 +658,15 @@ const FieldApp: React.FC = () => {
       {assignConfirm && (
         <div
           role="status"
+          className="toast"
           style={{
-            position: 'absolute',
-            bottom: 76,
-            left: '50%',
-            transform: 'translateX(-50%)',
-            zIndex: 20,
-            background: '#0f172a',
-            color: '#facc15',
-            border: '1px solid #facc15',
-            borderRadius: 999,
-            padding: '10px 18px',
-            fontSize: 14,
-            fontWeight: 700,
-            whiteSpace: 'nowrap',
-            boxShadow: '0 4px 16px rgba(0,0,0,0.4)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: 8,
           }}
         >
-          ✓ {assignConfirm}
+          <Icon name="check" size={16} />
+          {assignConfirm}
         </div>
       )}
     </div>
@@ -714,7 +706,7 @@ const FieldApp: React.FC = () => {
         {nameHint && (
           <div
             role="alert"
-            style={{ marginTop: 8, color: '#b00020', fontWeight: 600 }}
+            style={{ marginTop: 8, color: '#7A1F08', fontWeight: 600 }}
           >
             Name required before inspecting.
           </div>
@@ -740,7 +732,7 @@ const FieldApp: React.FC = () => {
         )}
         {pending > 0 && (
           <button
-            className="btn"
+            className="btn danger"
             type="button"
             onClick={async () => {
               if (window.confirm(`Clear ${pending} queued item(s)? This cannot be undone.`)) {
@@ -749,7 +741,7 @@ const FieldApp: React.FC = () => {
                 setSyncResult('Queue cleared.');
               }
             }}
-            style={{ marginTop: 8, background: '#fff', color: '#b00020', border: '1px solid #b00020' }}
+            style={{ marginTop: 8 }}
           >
             Clear sync queue ({pending})
           </button>
@@ -761,9 +753,9 @@ const FieldApp: React.FC = () => {
           {unreadCount > 0 && (
             <span
               style={{
-                background: '#b00020',
+                background: '#7A1F08',
                 color: '#fff',
-                borderRadius: 999,
+                borderRadius: 2,
                 padding: '2px 10px',
                 fontSize: 12,
                 fontWeight: 700,
@@ -787,7 +779,7 @@ const FieldApp: React.FC = () => {
                   marginBottom: 8,
                   border: '1px solid #ddd',
                   borderRadius: 8,
-                  background: n.read_at ? '#fff' : '#e8f0fe',
+                  background: n.read_at ? '#fff' : '#FBE7DF',
                 }}
                 onClick={() => {
                   void markNotificationRead(n.id).then(() =>
@@ -908,7 +900,7 @@ const FieldApp: React.FC = () => {
                   minHeight: 52,
                   fontWeight: 700,
                   fontSize: 16,
-                  background: '#0b57d0',
+                  background: '#001A52',
                   color: '#fff',
                 }}
               >
@@ -926,31 +918,18 @@ const FieldApp: React.FC = () => {
         </div>
       )}
 
-      <nav
-        style={{
-          position: 'fixed',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          display: 'grid',
-          gridTemplateColumns: 'repeat(4, 1fr)',
-          borderTop: '1px solid #ddd',
-          background: '#fff',
-          paddingBottom: 'env(safe-area-inset-bottom, 0px)',
-          zIndex: 50,
-        }}
-      >
+      <nav className="field-tabbar" aria-label="Field app sections">
         {(
           [
-            ['inspect', 'Inspect'],
-            ['map', 'Map'],
-            ['closure', 'Report closure'],
-            ['sync', 'Sync'],
-          ] as [Tab, string][]
-        ).map(([key, label]) => (
+            ['inspect', 'Inspect', 'clipboard'],
+            ['map', 'Map', 'map'],
+            ['closure', 'Closure', 'alert'],
+            ['sync', 'Sync', 'sync'],
+          ] as [Tab, string, 'clipboard' | 'map' | 'alert' | 'sync'][]
+        ).map(([key, label, icon]) => (
           <button
             key={key}
-            className="btn"
+            className={tab === key ? 'active' : ''}
             onClick={() => {
               if (key !== 'inspect' && key !== 'sync' && key !== 'map') {
                 if (!requireName()) return;
@@ -958,16 +937,12 @@ const FieldApp: React.FC = () => {
               setTab(key);
             }}
             aria-current={tab === key ? 'page' : undefined}
-            style={{
-              minHeight: 56,
-              borderRadius: 0,
-              background: tab === key ? '#e8f0fe' : '#fff',
-              color: tab === key ? '#0b57d0' : '#222',
-              fontWeight: 600,
-              fontSize: 14,
-            }}
           >
-            {label}
+            <Icon name={icon} size={22} />
+            <span>{label}</span>
+            {key === 'sync' && pending > 0 && (
+              <span className="tab-badge">{pending > 99 ? '99+' : pending}</span>
+            )}
           </button>
         ))}
       </nav>
