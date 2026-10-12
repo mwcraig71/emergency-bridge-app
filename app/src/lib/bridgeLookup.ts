@@ -2,6 +2,7 @@
 // Handles raw user input like "1892", "SC-1892", "000000000001892"
 // and resolves them to emg_bridges records.
 import { getSupabase } from './supabase';
+import { getCurrentFirmId, getFirmBridges } from './firm';
 import type { Bridge } from '../types';
 
 export type BridgeState = 'SC' | 'NC';
@@ -42,13 +43,25 @@ export interface ResolveResult {
  * Resolve a batch of raw IDs against emg_bridges.
  * Returns matched bridge records (deduped) plus the raw inputs
  * that matched nothing.
+ *
+ * When a firm is active (explicit firmId or the current firm), results are
+ * restricted to bridges in that firm's bridge group. Pass firmId as null
+ * to skip firm filtering entirely.
  */
 export async function resolveBridgeIds(
   rawIds: string[],
   state: BridgeState,
+  firmId?: string | null,
 ): Promise<ResolveResult> {
   const sb = getSupabase();
   if (!sb) throw new Error('Supabase is not configured');
+
+  // Firm scoping: only resolve bridges in the firm's group.
+  const fid = firmId === undefined ? getCurrentFirmId() : firmId;
+  let firmAssets: Set<string> | null = null;
+  if (fid) {
+    firmAssets = new Set(await getFirmBridges(fid));
+  }
 
   const inputToCandidates = new Map<string, string[]>();
   const allCandidates = new Set<string>();
@@ -89,7 +102,10 @@ export async function resolveBridgeIds(
       }
     }
     if (matched) {
-      if (!seenAssets.has(matched.asset_id)) {
+      if (firmAssets && !firmAssets.has(matched.asset_id)) {
+        // Bridge exists but is not in this firm's group — treat as not found.
+        notFound.push(raw);
+      } else if (!seenAssets.has(matched.asset_id)) {
         seenAssets.add(matched.asset_id);
         foundBridges.push(matched);
       }
