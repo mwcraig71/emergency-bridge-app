@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import type { Bridge, Roadblock, RoadStatusPin, PathTrack, TeamPosition } from '../types';
@@ -30,6 +30,14 @@ interface TeamMapProps {
   showLocate?: boolean;
   /** Show the "download offline map" button (field app). */
   showOfflineDownload?: boolean;
+  /**
+   * Assignment filter (field app). When provided, the map defaults to showing
+   * only these bridges; NBI inventory renders as dimmed background data behind
+   * a toggle. When omitted (dashboard), all bridges render as today.
+   */
+  assignedAssetIds?: string[];
+  /** Field-app callback for the info sheet "Add to my list" button. */
+  onAssignToSelf?: (bridge: Bridge) => void;
   position?: { lon: number; lat: number } | null;
   height?: string;
   onBridgeClick?: (assetId: string) => void;
@@ -189,11 +197,64 @@ function ratingColor(r: string | null | undefined): string {
   return '#dc2626';
 }
 
+type BridgeMode = 'normal' | 'mine' | 'bg';
+
+/**
+ * Build bridge GeoJSON features with assignment-filter styling.
+ *
+ * - assigned == null (no filter, e.g. dashboard): every bridge renders
+ *   `normal` — identical to the pre-filter rendering.
+ * - showAll == false: only assigned bridges render, each `mine` (highlighted).
+ * - showAll == true: assigned bridges render `mine`, everything else `bg`
+ *   (dimmed background data the inspector can tap to add to their list).
+ */
+function buildBridgeFeatures(
+  bridges: Bridge[],
+  triageByAsset: Map<string, string>,
+  assigned: Set<string> | null,
+  showAll: boolean,
+): GeoJSON.Feature[] {
+  const out: GeoJSON.Feature[] = [];
+  for (const b of bridges) {
+    if (
+      typeof b.lon !== 'number' ||
+      typeof b.lat !== 'number' ||
+      !Number.isFinite(b.lon) ||
+      !Number.isFinite(b.lat)
+    ) {
+      continue;
+    }
+    let mode: BridgeMode = 'normal';
+    if (assigned) {
+      const isMine = assigned.has(b.asset_id);
+      if (!showAll && !isMine) continue;
+      mode = isMine ? 'mine' : 'bg';
+    }
+    const triage = triageByAsset.get(b.asset_id);
+    out.push({
+      type: 'Feature' as const,
+      geometry: {
+        type: 'Point' as const,
+        coordinates: [b.lon, b.lat] as [number, number],
+      },
+      properties: {
+        asset_id: b.asset_id,
+        label: shortAssetId(b.asset_id),
+        color: statusColor(triage),
+        mode,
+      },
+    });
+  }
+  return out;
+}
+
 export default function TeamMap({
   focusBridge,
   showTeam = false,
   showLocate = false,
   showOfflineDownload = false,
+  assignedAssetIds,
+  onAssignToSelf,
   position = null,
   height = '60dvh',
   onBridgeClick,
@@ -210,6 +271,21 @@ export default function TeamMap({
   const [styleError, setStyleError] = useState<boolean>(false);
   const [ready, setReady] = useState<boolean>(false);
   const [selected, setSelected] = useState<Bridge | null>(null);
+  // Assignment filter (field app): NBI inventory is background data; only the
+  // inspector's assigned bridges are prominent unless they toggle "show all".
+  const [showAllBridges, setShowAllBridges] = useState<boolean>(false);
+  const filterActive = assignedAssetIds !== undefined;
+  const assignedSet = useMemo(
+    () => (assignedAssetIds ? new Set(assignedAssetIds) : null),
+    [assignedAssetIds],
+  );
+  // Latest-ref for map callbacks/effects (assignedSet itself is render-safe).
+  const assignedIdsRef = useRef<Set<string> | null>(null);
+  assignedIdsRef.current = assignedSet;
+  const showAllRef = useRef<boolean>(false);
+  useEffect(() => {
+    showAllRef.current = showAllBridges;
+  }, [showAllBridges]);
   // Offline tile download state
   const [dlOpen, setDlOpen] = useState(false);
   const [dlBounds, setDlBounds] = useState<TileBounds | null>(null);
@@ -448,15 +524,28 @@ export default function TeamMap({
               ['linear'],
               ['zoom'],
               5,
-              2.5,
+              ['match', ['get', 'mode'], 'mine', 4, 2.5],
               10,
-              5,
+              ['match', ['get', 'mode'], 'mine', 7, 5],
               14,
-              8,
+              ['match', ['get', 'mode'], 'mine', 10, 8],
             ],
             'circle-color': ['get', 'color'],
-            'circle-stroke-color': '#0b1220',
-            'circle-stroke-width': 0.6,
+            'circle-opacity': ['match', ['get', 'mode'], 'bg', 0.35, 1],
+            'circle-stroke-color': [
+              'match',
+              ['get', 'mode'],
+              'mine',
+              '#facc15',
+              '#0b1220',
+            ],
+            'circle-stroke-width': [
+              'match',
+              ['get', 'mode'],
+              'mine',
+              2.4,
+              0.6,
+            ],
           },
         });
 
@@ -502,6 +591,7 @@ export default function TeamMap({
             'text-color': '#e2e8f0',
             'text-halo-color': '#0b1220',
             'text-halo-width': 1.5,
+            'text-opacity': ['match', ['get', 'mode'], 'bg', 0.4, 1],
           },
         });
 
@@ -867,31 +957,13 @@ export default function TeamMap({
       const store = dataRef.current;
       const sel = recency;
 
-      // Bridges
-      const bridgeFeatures = store.bridges
-        .filter(
-          (b) =>
-            typeof b.lon === 'number' &&
-            typeof b.lat === 'number' &&
-            Number.isFinite(b.lon) &&
-            Number.isFinite(b.lat),
-        )
-        .map((b) => {
-          const triage = store.triageByAsset.get(b.asset_id);
-          const color = statusColor(triage);
-          return {
-            type: 'Feature' as const,
-            geometry: {
-              type: 'Point' as const,
-              coordinates: [b.lon, b.lat] as [number, number],
-            },
-            properties: {
-              asset_id: b.asset_id,
-              label: shortAssetId(b.asset_id),
-              color,
-            },
-          };
-        });
+      // Bridges (assignment-filtered: NBI inventory is background data)
+      const bridgeFeatures = buildBridgeFeatures(
+        store.bridges,
+        store.triageByAsset,
+        assignedIdsRef.current,
+        showAllRef.current,
+      );
       const bSrc = map.getSource('bridges') as
         | maplibregl.GeoJSONSource
         | undefined;
@@ -1067,6 +1139,27 @@ export default function TeamMap({
     };
   }, [ready, recency, showTeam]);
 
+  // Re-apply the bridge layer when the assignment filter changes (toggle or
+  // assignments refresh) without re-running the full data fetch.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready) return;
+    const store = dataRef.current;
+    const bSrc = map.getSource('bridges') as
+      | maplibregl.GeoJSONSource
+      | undefined;
+    if (!bSrc) return;
+    bSrc.setData({
+      type: 'FeatureCollection',
+      features: buildBridgeFeatures(
+        store.bridges,
+        store.triageByAsset,
+        assignedIdsRef.current,
+        showAllRef.current,
+      ),
+    });
+  }, [ready, showAllBridges, assignedAssetIds]);
+
   // Focus bridge marker + route
   useEffect(() => {
     const map = mapRef.current;
@@ -1181,6 +1274,43 @@ export default function TeamMap({
         className="map-wrap"
         style={{ position: 'absolute', inset: 0 }}
       />
+
+      {/* Assignment filter toggle (field app) — top-left, compact */}
+      {filterActive && (
+        <div
+          style={{
+            position: 'absolute',
+            top: 8,
+            left: 8,
+            zIndex: 5,
+            display: 'flex',
+            gap: 6,
+            alignItems: 'center',
+          }}
+        >
+          <button
+            type="button"
+            onClick={() => setShowAllBridges((v) => !v)}
+            aria-pressed={showAllBridges}
+            style={{
+              background: showAllBridges
+                ? 'rgba(15,23,42,0.85)'
+                : 'rgba(250,204,21,0.92)',
+              color: showAllBridges ? '#e2e8f0' : '#0f172a',
+              border: '1px solid #334155',
+              borderRadius: 6,
+              padding: '8px 12px',
+              fontSize: 13,
+              fontWeight: 700,
+              cursor: 'pointer',
+            }}
+          >
+            {showAllBridges
+              ? `My bridges (${assignedAssetIds?.length ?? 0})`
+              : 'Show all'}
+          </button>
+        </div>
+      )}
 
       {/* Recency filter overlay */}
       <div
@@ -1515,6 +1645,29 @@ export default function TeamMap({
                     }}
                   >
                     Get Directions
+                  </button>
+                )}
+                {onAssignToSelf && assignedSet && !assignedSet.has(selected.asset_id) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const b = selected;
+                      setSelected(null);
+                      onAssignToSelf(b);
+                    }}
+                    style={{
+                      flex: 1,
+                      minHeight: 48,
+                      borderRadius: 10,
+                      border: '1px solid #facc15',
+                      background: 'rgba(250,204,21,0.12)',
+                      color: '#facc15',
+                      fontSize: 15,
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    ＋ Add to my list
                   </button>
                 )}
                 <button
