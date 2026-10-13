@@ -4,6 +4,7 @@ import FieldApp from './field/FieldApp';
 import Dashboard from './dashboard/Dashboard';
 import StateDashboard from './dashboard/StateDashboard';
 import LoginScreen from './components/LoginScreen';
+import UpdateButton from './components/UpdateButton';
 import {
   clearSession,
   getAdminProfile,
@@ -76,6 +77,7 @@ function EnvNav({
       ) : (
         <span className="env-user">Signed in as {session.kind === 'inspector' ? session.inspectorName : ''}</span>
       )}
+      <UpdateButton />
       <button type="button" className="env-signout" onClick={onSignOut}>
         Sign out
       </button>
