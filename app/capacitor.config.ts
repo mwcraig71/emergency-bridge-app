@@ -17,7 +17,7 @@ const config: CapacitorConfig = {
       autoUpdate: true,
       resetWhenUpdate: false,
       updateUrl:
-        'https://mwcraig71.github.io/emergency-bridge-app/ota/manifest.json',
+        'https://qyymkvjvqofcaeustqqy.supabase.co/functions/v1/ota-manifest',
     },
   },
 };
