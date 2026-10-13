@@ -9,7 +9,42 @@
 // per-firm completion, condition rollups, and bridge-to-firm assignment.
 import { getSupabase, isSupabaseConfigured, isOnline } from './supabase';
 import { syncFirms, getCachedFirms } from './firm';
-import type { Firm } from '../types';
+import type { EmgState, Firm } from '../types';
+
+/**
+ * A bridge's state is the prefix of its asset_id before '-'
+ * (asset IDs are state-prefixed: 'SC-1892', 'NC-10001' — migration 015).
+ */
+export function stateOfAsset(assetId: string): string {
+  const i = assetId.indexOf('-');
+  return i > 0 ? assetId.slice(0, i).toUpperCase() : '';
+}
+
+/** States known before migration 015 / when offline. */
+export const FALLBACK_STATES: EmgState[] = [
+  { code: 'SC', name: 'South Carolina', created_at: '' },
+  { code: 'NC', name: 'North Carolina', created_at: '' },
+];
+
+/** Load the state list from emg_states; falls back to SC/NC. */
+export async function loadStates(): Promise<EmgState[]> {
+  const sb = getSupabase();
+  if (!sb || !isSupabaseConfigured() || !isOnline()) return FALLBACK_STATES;
+  try {
+    const { data, error } = await sb
+      .from('emg_states')
+      .select('code,name,created_at')
+      .order('code');
+    if (error || !data || data.length === 0) return FALLBACK_STATES;
+    return (data as unknown as EmgState[]).map((s) => ({
+      code: String(s.code),
+      name: String(s.name ?? s.code),
+      created_at: String(s.created_at ?? ''),
+    }));
+  } catch {
+    return FALLBACK_STATES;
+  }
+}
 
 /** Distinct firm colors for map + table chips. */
 export const FIRM_PALETTE = [
@@ -141,13 +176,25 @@ export interface StateData {
   assignments: AssignmentLite[];
 }
 
-/** Load every firm + bridge mapping + inspection + assignment row. */
-export async function loadStateData(): Promise<StateData> {
+/**
+ * Load every firm + bridge mapping + inspection + assignment row.
+ * When `stateCode` is given, the result is scoped to that state:
+ * firms with that state_code, their bridge mappings (additionally
+ * prefix-checked against asset_id), and inspections/assignments for
+ * bridges in that state. Firms with no state assigned appear only in
+ * the unscoped (super admin) view.
+ */
+export async function loadStateData(stateCode?: string | null): Promise<StateData> {
   const online = isOnline() && isSupabaseConfigured();
   const firms: Firm[] = online ? await syncFirms().catch(() => []) : [];
   const cached = firms.length > 0 ? firms : await getCachedFirms().catch(() => []);
   if (!online) {
-    return { firms: cached, firmBridges: [], inspections: [], assignments: [] };
+    return {
+      firms: stateCode ? cached.filter((f) => f.state_code === stateCode) : cached,
+      firmBridges: [],
+      inspections: [],
+      assignments: [],
+    };
   }
   const [firmBridges, inspections, assignments] = await Promise.all([
     fetchAll<{ firm_id: string; asset_id: string }>(
@@ -166,7 +213,18 @@ export async function loadStateData(): Promise<StateData> {
       'asset_id',
     ).catch(() => []),
   ]);
-  return { firms: cached, firmBridges, inspections, assignments };
+  const all: StateData = { firms: cached, firmBridges, inspections, assignments };
+  if (!stateCode) return all;
+  const scopedFirms = cached.filter((f) => f.state_code === stateCode);
+  const scopedFirmIds = new Set(scopedFirms.map((f) => f.id));
+  return {
+    firms: scopedFirms,
+    firmBridges: firmBridges.filter(
+      (fb) => scopedFirmIds.has(fb.firm_id) && stateOfAsset(fb.asset_id) === stateCode,
+    ),
+    inspections: inspections.filter((i) => stateOfAsset(i.asset_id) === stateCode),
+    assignments: assignments.filter((a) => stateOfAsset(a.asset_id) === stateCode),
+  };
 }
 
 /** Latest inspection per bridge (by inspection_datetime). */
@@ -298,9 +356,12 @@ export function computeFirmProgress(data: StateData): FirmProgress[] {
   return [...byFirm.values()].sort((a, b) => b.pctComplete - a.pctComplete);
 }
 
-/** Aggregate overview across all firms. */
+/** Aggregate overview across all firms in `data` (already state-scoped
+ *  by loadStateData when a scope was requested). `stateCode` only
+ *  scopes the inventory-total count query. */
 export async function computeStateOverview(
   data: StateData,
+  stateCode?: string | null,
 ): Promise<StateOverview> {
   const progress = computeFirmProgress(data);
   const latest = latestInspections(data.inspections);
@@ -336,14 +397,17 @@ export async function computeStateOverview(
     }
   }
   const totalAssigned = progress.reduce((s, p) => s + p.assigned, 0);
-  // Inventory total (cheap count query).
+  // Inventory total (cheap count query), scoped to the state's
+  // asset_id prefix when a state scope is active.
   let inventoryTotal = 0;
   try {
     const sb = getSupabase();
     if (sb && isSupabaseConfigured() && isOnline()) {
-      const { count } = await sb
+      let q = sb
         .from('emg_bridges')
         .select('asset_id', { count: 'exact', head: true });
+      if (stateCode) q = q.like('asset_id', `${stateCode}-%`);
+      const { count } = await q;
       inventoryTotal = count ?? 0;
     }
   } catch {
@@ -411,20 +475,31 @@ export async function unassignBridgesFromFirm(
   }
 }
 
-/** Create a firm. */
-export async function createFirm(name: string): Promise<Firm> {
+/** Create a firm. When created from a state-scoped view, pass the
+ *  state so the firm is born assigned to it. */
+export async function createFirm(
+  name: string,
+  stateCode?: string | null,
+): Promise<Firm> {
   const sb = getSupabase();
   if (!sb || !isSupabaseConfigured()) throw new Error('Supabase is not configured');
   const clean = name.trim();
   if (!clean) throw new Error('Firm name is required');
   const { data, error } = await sb
     .from('firms')
-    .insert({ name: clean })
-    .select('id,name,created_at')
+    .insert(
+      stateCode ? { name: clean, state_code: stateCode } : { name: clean },
+    )
+    .select('id,name,created_at,state_code')
     .single();
   if (error) throw error;
   const f = data as unknown as Firm;
-  return { id: String(f.id), name: String(f.name), created_at: String(f.created_at ?? '') };
+  return {
+    id: String(f.id),
+    name: String(f.name),
+    created_at: String(f.created_at ?? ''),
+    state_code: f.state_code ? String(f.state_code) : null,
+  };
 }
 
 /** Which firm (if any) currently owns each of these bridges. */

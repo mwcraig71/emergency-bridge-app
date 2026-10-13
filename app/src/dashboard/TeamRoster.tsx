@@ -8,6 +8,9 @@ interface TeamRosterProps {
   /** Firm from the admin session. */
   firmId?: string;
   firmName?: string;
+  /** State scope (state_admin sessions): the firm picker only lists
+   *  firms in this state. Null/undefined = no state restriction. */
+  stateCode?: string | null;
 }
 
 function errMsg(e: unknown): string {
@@ -21,7 +24,7 @@ function errMsg(e: unknown): string {
  * written to the server. All writes need network; the list itself can show
  * the local cache.
  */
-export default function TeamRoster({ firmId, firmName }: TeamRosterProps) {
+export default function TeamRoster({ firmId, firmName, stateCode }: TeamRosterProps) {
   const [activeFirmId, setActiveFirmId] = useState(firmId ?? '');
   const [firms, setFirms] = useState<Firm[]>([]);
   const [roster, setRoster] = useState<Inspector[]>([]);
@@ -52,7 +55,11 @@ export default function TeamRoster({ firmId, firmName }: TeamRosterProps) {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      const list = await getCachedFirms();
+      const all = await getCachedFirms();
+      // State admins only see firms in their state.
+      const list = stateCode
+        ? all.filter((f) => f.state_code === stateCode)
+        : all;
       if (cancelled) return;
       setFirms(list);
       if (!activeFirmId && list.length === 1) setActiveFirmId(list[0].id);
@@ -61,7 +68,7 @@ export default function TeamRoster({ firmId, firmName }: TeamRosterProps) {
     return () => {
       cancelled = true;
     };
-  }, [activeFirmId, refresh]);
+  }, [activeFirmId, refresh, stateCode]);
 
   const requireOnline = (): boolean => {
     if (!isOnline() || !isSupabaseConfigured()) {

@@ -250,10 +250,51 @@ export interface AppNotification {
 }
 
 /** Firm (tenant). Firms receive groups of bridges and assign them to
- *  inspector teams within the firm. */
+ *  inspector teams within the firm. state_code is the state the firm
+ *  operates in (migration 015); null until a state/overall admin
+ *  assigns one — never assume a firm's state. */
 export interface Firm {
   id: string;
   name: string;
+  created_at: string;
+  state_code?: string | null;
+}
+
+/** A state that runs an inspection program (emg_states, migration 015). */
+export interface EmgState {
+  code: string;
+  name: string;
+  created_at: string;
+}
+
+/** Admin role hierarchy (migration 015):
+ *  super_admin — overall admin; all states, all firms.
+ *  state_admin — one state; manages that state's firms and admins.
+ *  firm_admin  — one firm; the firm ops login. */
+export type AdminRole = 'super_admin' | 'state_admin' | 'firm_admin';
+
+/** Role profile resolved at admin sign-in from emg_admins (see
+ *  lib/auth.ts). Stored on the admin session so the UI can scope
+ *  without refetching on every render. */
+export interface AdminProfile {
+  role: AdminRole;
+  email: string;
+  /** Set for state_admin. */
+  stateCode?: string | null;
+  /** Set for firm_admin when the login is bound to one firm. */
+  firmId?: string | null;
+}
+
+/** One admin role assignment row (emg_admins). The row grants the role;
+ *  the person also needs a Supabase Auth account with the same email to
+ *  actually sign in. auth_user_id is linked on first sign-in. */
+export interface EmgAdmin {
+  id: string;
+  auth_user_id: string | null;
+  email: string;
+  role: AdminRole;
+  state_code: string | null;
+  firm_id: string | null;
   created_at: string;
 }
 

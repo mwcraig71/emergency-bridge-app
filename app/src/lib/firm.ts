@@ -21,7 +21,7 @@ import type { Firm, Inspector } from '../types';
 
 const FIRM_ID_STORAGE_KEY = 'emg.firm_id';
 
-const FIRM_SELECT = 'id,name,created_at';
+const FIRM_SELECT = 'id,name,created_at,state_code';
 // The salted SHA-256 PIN hash IS selected by clients: it is cached in
 // IndexedDB so offline inspector login can verify PINs with zero network
 // calls (see lib/auth.ts). The salt is the inspector id (stored in the same
@@ -80,6 +80,7 @@ export async function syncFirms(): Promise<Firm[]> {
     id: String(f.id),
     name: String(f.name ?? ''),
     created_at: String(f.created_at ?? ''),
+    state_code: f.state_code ? String(f.state_code) : null,
   }));
   await idbBulkPut('firms', rows);
   return rows;

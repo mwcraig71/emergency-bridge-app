@@ -17,6 +17,9 @@ import type { Bridge, Firm } from '../types';
 interface Props {
   firms: Firm[];
   onFirmsChanged: () => void;
+  /** Active state scope (state_admin, or a super admin's state filter).
+   *  Firms created here are assigned to this state. */
+  stateCode?: string | null;
 }
 
 /**
@@ -24,7 +27,7 @@ interface Props {
  * Paste IDs or upload CSV, resolve against inventory, pick a firm, assign.
  * Shows each bridge's current firm before assigning.
  */
-export default function FirmBulkAssign({ firms, onFirmsChanged }: Props) {
+export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Props) {
   const [state, setState] = useState<BridgeState>('SC');
   const [pasteText, setPasteText] = useState('');
   const [firmId, setFirmId] = useState('');
@@ -47,6 +50,11 @@ export default function FirmBulkAssign({ firms, onFirmsChanged }: Props) {
   useEffect(() => {
     if (!firmId && firms.length > 0) setFirmId(firms[0].id);
   }, [firms, firmId]);
+
+  // In a state-scoped view, bridge resolution defaults to that state.
+  useEffect(() => {
+    if (stateCode === 'SC' || stateCode === 'NC') setState(stateCode);
+  }, [stateCode]);
 
   const handleResolve = async () => {
     const ids = parseIdList(pasteText);
@@ -149,7 +157,7 @@ export default function FirmBulkAssign({ firms, onFirmsChanged }: Props) {
     setCreatingFirm(true);
     setMessage(null);
     try {
-      const f = await createFirm(newFirmName.trim());
+      const f = await createFirm(newFirmName.trim(), stateCode ?? null);
       await syncFirms().catch(() => undefined);
       setNewFirmName('');
       setFirmId(f.id);

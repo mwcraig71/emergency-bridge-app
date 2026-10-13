@@ -6,18 +6,33 @@ import StateDashboard from './dashboard/StateDashboard';
 import LoginScreen from './components/LoginScreen';
 import {
   clearSession,
+  getAdminProfile,
   getSession,
   restoreAdminSession,
   type AuthSession,
 } from './lib/auth';
+import type { AdminProfile } from './types';
 import { getSupabase } from './lib/supabase';
+
+function adminRoleLabel(profile: AdminProfile): string {
+  switch (profile.role) {
+    case 'super_admin':
+      return 'Super admin';
+    case 'state_admin':
+      return `State admin${profile.stateCode ? ` — ${profile.stateCode}` : ''}`;
+    case 'firm_admin':
+      return 'Firm admin';
+  }
+}
 
 // HashRouter: required for Capacitor file:// URLs (BrowserRouter breaks on device).
 function EnvNav({
   session,
+  profile,
   onSignOut,
 }: {
   session: AuthSession;
+  profile: AdminProfile | null;
   onSignOut: () => void;
 }) {
   const loc = useLocation();
@@ -27,31 +42,39 @@ function EnvNav({
     : path.startsWith('/dashboard')
       ? 'firm'
       : 'field';
+  const role = profile?.role ?? 'firm_admin';
   return (
     <nav className="env-nav">
       <span className="brandmark" aria-label="Strinteg">
         <span className="str">STR</span>INTEG
       </span>
-      {session.kind === 'firm_admin' ? (
+      {session.kind === 'firm_admin' && profile ? (
         <>
-          <Link to="/" className={`env-link${active === 'field' ? ' active' : ''}`}>
-            Field app
-          </Link>
+          {role !== 'state_admin' && (
+            <Link to="/" className={`env-link${active === 'field' ? ' active' : ''}`}>
+              Field app
+            </Link>
+          )}
           <Link
             to="/dashboard"
             className={`env-link${active === 'firm' ? ' active' : ''}`}
           >
             Firm ops
           </Link>
-          <Link
-            to="/statedashboard"
-            className={`env-link${active === 'state' ? ' active' : ''}`}
-          >
-            State ops
-          </Link>
+          {role !== 'firm_admin' && (
+            <Link
+              to="/statedashboard"
+              className={`env-link${active === 'state' ? ' active' : ''}`}
+            >
+              State ops
+            </Link>
+          )}
+          <span className="env-user">
+            {profile.email} · {adminRoleLabel(profile)}
+          </span>
         </>
       ) : (
-        <span className="env-user">Signed in as {session.inspectorName}</span>
+        <span className="env-user">Signed in as {session.kind === 'inspector' ? session.inspectorName : ''}</span>
       )}
       <button type="button" className="env-signout" onClick={onSignOut}>
         Sign out
@@ -62,7 +85,10 @@ function EnvNav({
 
 /**
  * Login is the front door. No session → <LoginScreen/> full-screen, no nav.
- * Inspector session → field app only. Firm admin session → all routes.
+ * Inspector session → field app only. Admin sessions route by role
+ * (migration 015): super_admin → everything; state_admin → state +
+ * firm ops scoped to their state; firm_admin → field app + firm ops
+ * scoped to their firm.
  */
 export default function App() {
   // undefined = still checking; null = no session (show login).
@@ -106,21 +132,49 @@ export default function App() {
     return <LoginScreen onSignedIn={setSession} />;
   }
 
+  const profile = getAdminProfile(session);
+  const role = profile?.role ?? 'firm_admin';
+
   return (
     <HashRouter>
-      <EnvNav session={session} onSignOut={handleSignOut} />
+      <EnvNav session={session} profile={profile} onSignOut={handleSignOut} />
       <Routes>
         {session.kind === 'inspector' ? (
           <Route
             path="/*"
             element={<FieldApp inspectorName={session.inspectorName} />}
           />
-        ) : (
+        ) : role === 'state_admin' ? (
+          <>
+            <Route
+              path="/dashboard/*"
+              element={
+                <Dashboard firmId={session.firmId} adminProfile={profile} />
+              }
+            />
+            <Route
+              path="/*"
+              element={<StateDashboard stateScope={profile?.stateCode ?? null} />}
+            />
+          </>
+        ) : role === 'super_admin' ? (
           <>
             <Route path="/statedashboard/*" element={<StateDashboard />} />
             <Route
               path="/dashboard/*"
-              element={<Dashboard firmId={session.firmId} />}
+              element={
+                <Dashboard firmId={session.firmId} adminProfile={profile} />
+              }
+            />
+            <Route path="/*" element={<FieldApp />} />
+          </>
+        ) : (
+          <>
+            <Route
+              path="/dashboard/*"
+              element={
+                <Dashboard firmId={session.firmId} adminProfile={profile} />
+              }
             />
             <Route path="/*" element={<FieldApp />} />
           </>

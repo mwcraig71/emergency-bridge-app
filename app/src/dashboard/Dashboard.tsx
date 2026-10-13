@@ -7,9 +7,10 @@ import UploadNbi from './UploadNbi';
 import AssignmentsPanel from './AssignmentsPanel';
 import TeamMap from '../components/TeamMap';
 import TeamRoster from './TeamRoster';
+import AdminManager from './AdminManager';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import { idbGetAll } from '../lib/idb';
-import type { Bridge } from '../types';
+import type { AdminProfile, Bridge } from '../types';
 
 interface BridgeInspection {
   id: string;
@@ -29,15 +30,26 @@ function rating(v: unknown): string {
 export default function Dashboard({
   firmId,
   firmName,
+  adminProfile,
 }: {
   firmId?: string;
   firmName?: string;
+  /** Signed-in admin's role profile (migration 015). Drives the Admins
+   *  tab and state scoping of firm pickers. */
+  adminProfile?: AdminProfile | null;
 }) {
+  const canManageAdmins =
+    adminProfile?.role === 'super_admin' ||
+    adminProfile?.role === 'state_admin';
+  const rosterStateCode =
+    adminProfile?.role === 'state_admin'
+      ? (adminProfile.stateCode ?? null)
+      : null;
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [bridge, setBridge] = useState<Bridge | null>(null);
   const [inspections, setInspections] = useState<BridgeInspection[] | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
-  const [view, setView] = useState<'overview' | 'upload' | 'assignments' | 'team'>('overview');
+  const [view, setView] = useState<'overview' | 'upload' | 'assignments' | 'team' | 'admins'>('overview');
 
   const handleSelectBridge = useCallback((assetId: string) => {
     setSelectedAssetId(assetId);
@@ -144,6 +156,15 @@ export default function Dashboard({
           >
             Team roster
           </button>
+          {canManageAdmins && (
+            <button
+              type="button"
+              className={view === 'admins' ? 'active' : ''}
+              onClick={() => setView('admins')}
+            >
+              Admins
+            </button>
+          )}
         </nav>
       </header>
 
@@ -162,7 +183,17 @@ export default function Dashboard({
       ) : view === 'team' ? (
         <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
           <main className="dash-main">
-            <TeamRoster firmId={firmId} firmName={firmName} />
+            <TeamRoster
+              firmId={firmId}
+              firmName={firmName}
+              stateCode={rosterStateCode}
+            />
+          </main>
+        </div>
+      ) : view === 'admins' && canManageAdmins && adminProfile ? (
+        <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <main className="dash-main">
+            <AdminManager profile={adminProfile} />
           </main>
         </div>
       ) : (

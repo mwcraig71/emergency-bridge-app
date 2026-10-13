@@ -12,8 +12,8 @@
 //     localStorage, no IndexedDB. Only the hash is written (on admin set)
 //     and cached (for offline verification).
 import { getSupabase, isOnline, isSupabaseConfigured } from './supabase';
-import { syncFirms, syncInspectors } from './firm';
-import type { Inspector } from '../types';
+import { setCurrentFirmId, syncFirms, syncInspectors } from './firm';
+import type { AdminProfile, Inspector } from '../types';
 
 export type AuthSession =
   | {
@@ -29,6 +29,10 @@ export type AuthSession =
       email: string;
       /** Firm the admin belongs to, when known. */
       firmId?: string;
+      /** Role profile from emg_admins (migration 015). Optional so
+       *  sessions stored before roles existed still parse; readers go
+       *  through getAdminProfile(), which applies the legacy default. */
+      profile?: AdminProfile;
       rememberedAt: string;
     };
 
@@ -144,6 +148,89 @@ function friendlyAuthError(message: string): string {
   return message || 'Sign-in failed. Try again.';
 }
 
+interface EmgAdminRow {
+  role: AdminProfile['role'];
+  state_code: string | null;
+  firm_id: string | null;
+}
+
+/**
+ * Resolve the signed-in admin's role profile from emg_admins
+ * (migration 015): look up by auth_user_id first, then by email
+ * (linking auth_user_id when found by email so later lookups hit the
+ * id path).
+ *
+ * If NO row exists — or the table is unreachable (migration not run
+ * yet) — fall back to the LEGACY behavior: firm_admin with no firm
+ * binding, picking their firm in the dashboard. Nobody is locked out
+ * by a missing role row.
+ */
+export async function fetchAdminProfile(
+  authUserId: string,
+  email: string,
+): Promise<AdminProfile> {
+  const legacy: AdminProfile = { role: 'firm_admin', email };
+  const sb = getSupabase();
+  if (!sb) return legacy;
+  try {
+    let row: EmgAdminRow | null = null;
+    const byId = await sb
+      .from('emg_admins')
+      .select('role,state_code,firm_id')
+      .eq('auth_user_id', authUserId)
+      .maybeSingle();
+    if (!byId.error) row = (byId.data as EmgAdminRow | null) ?? null;
+    if (!row) {
+      const byEmail = await sb
+        .from('emg_admins')
+        .select('role,state_code,firm_id')
+        .eq('email', email)
+        .maybeSingle();
+      if (byEmail.error) return legacy;
+      row = (byEmail.data as EmgAdminRow | null) ?? null;
+      if (row) {
+        // Best-effort link so the next sign-in finds the row by id.
+        try {
+          await sb
+            .from('emg_admins')
+            .update({ auth_user_id: authUserId })
+            .eq('email', email);
+        } catch {
+          // ignore — email fallback keeps working
+        }
+      }
+    }
+    if (!row) return legacy;
+    return {
+      role: row.role,
+      email,
+      stateCode: row.state_code ?? null,
+      firmId: row.firm_id ?? null,
+    };
+  } catch {
+    return legacy;
+  }
+}
+
+/**
+ * The admin profile for a session (or the current session when none is
+ * passed). Sessions stored before roles existed get the legacy default
+ * (firm_admin, unbound). Returns null for inspector / no session.
+ */
+export function getAdminProfile(
+  session?: AuthSession | null,
+): AdminProfile | null {
+  const s = session === undefined ? getSession() : session;
+  if (!s || s.kind !== 'firm_admin') return null;
+  if (s.profile) return s.profile;
+  return {
+    role: 'firm_admin',
+    email: s.email,
+    firmId: s.firmId ?? null,
+    stateCode: null,
+  };
+}
+
 /**
  * Firm admin sign-in (Supabase Auth). Requires network.
  * The supabase client runs with persistSession:false, so we persist the
@@ -166,6 +253,14 @@ export async function signInFirmAdmin(
   });
   if (error) throw new Error(friendlyAuthError(error.message));
   if (!data.session) throw new Error('Sign-in failed. Try again.');
+  // Resolve the role profile (super / state / firm admin) from
+  // emg_admins. Missing row → legacy firm_admin default (see
+  // fetchAdminProfile) — never a lockout.
+  const cleanEmail = email.trim();
+  const profile = await fetchAdminProfile(
+    data.user?.id ?? '',
+    cleanEmail,
+  ).catch(() => ({ role: 'firm_admin', email: cleanEmail }) as AdminProfile);
   if (remember) {
     try {
       localStorage.setItem(
@@ -185,9 +280,15 @@ export async function signInFirmAdmin(
       // ignore
     }
   }
+  // A firm-bound admin lands on their firm everywhere firm scoping applies.
+  if (profile.role === 'firm_admin' && profile.firmId) {
+    setCurrentFirmId(profile.firmId);
+  }
   return {
     kind: 'firm_admin',
-    email: email.trim(),
+    email: cleanEmail,
+    firmId: profile.firmId ?? undefined,
+    profile,
     rememberedAt: new Date().toISOString(),
   };
 }

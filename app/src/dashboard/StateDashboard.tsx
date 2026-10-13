@@ -3,6 +3,7 @@ import TeamMap from '../components/TeamMap';
 import FirmBulkAssign from './FirmBulkAssign';
 import {
   loadStateData,
+  loadStates,
   computeFirmProgress,
   computeStateOverview,
   buildStateBridgeRows,
@@ -14,7 +15,7 @@ import {
   type StateBridgeRow,
   type BridgeDetail,
 } from '../lib/stateDashboard';
-import type { Firm } from '../types';
+import type { EmgState, Firm } from '../types';
 
 type View = 'overview' | 'assign' | 'map';
 
@@ -71,12 +72,41 @@ function StatCard({ label, value, sub }: { label: string; value: string; sub?: s
   );
 }
 
-export default function StateDashboard() {
+interface StateDashboardProps {
+  /** Fixed state scope (state_admin sessions). Null/undefined = all
+   *  states, with a state filter dropdown (super_admin). */
+  stateScope?: string | null;
+}
+
+export default function StateDashboard({ stateScope }: StateDashboardProps) {
   const [view, setView] = useState<View>('overview');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [data, setData] = useState<StateData | null>(null);
   const [overview, setOverview] = useState<StateOverview | null>(null);
+
+  // State scope: a state_admin is locked to `stateScope`; a super_admin
+  // picks via the state filter ('all' = every state).
+  const [states, setStates] = useState<EmgState[]>([]);
+  const [stateFilter, setStateFilter] = useState<string>('all');
+  const effectiveScope: string | null =
+    stateScope ?? (stateFilter === 'all' ? null : stateFilter);
+  const scopeName =
+    states.find((s) => s.code === effectiveScope)?.name ?? effectiveScope;
+
+  useEffect(() => {
+    let cancelled = false;
+    loadStates()
+      .then((list) => {
+        if (!cancelled) setStates(list);
+      })
+      .catch(() => {
+        // fallback list already applied inside loadStates on failure
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Filters
   const [firmFilter, setFirmFilter] = useState<string>('all');
@@ -99,15 +129,15 @@ export default function StateDashboard() {
     setLoading(true);
     setError(null);
     try {
-      const d = await loadStateData();
+      const d = await loadStateData(effectiveScope);
       setData(d);
-      setOverview(await computeStateOverview(d));
+      setOverview(await computeStateOverview(d, effectiveScope));
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [effectiveScope]);
 
   useEffect(() => {
     void loadAll();
@@ -224,6 +254,35 @@ export default function StateDashboard() {
       <header className="dash-header">
         <div className="eyebrow">State operations</div>
         <h1>Emergency Bridge Inspection</h1>
+        {stateScope ? (
+          <p className="muted" style={{ margin: '4px 0 0' }}>
+            {scopeName ?? stateScope} — showing only this state&rsquo;s firms
+            and bridges.
+          </p>
+        ) : (
+          <div style={{ marginTop: 8 }}>
+            <label
+              style={{
+                display: 'inline-flex',
+                flexDirection: 'column',
+                gap: 4,
+              }}
+            >
+              <span className="muted">State</span>
+              <select
+                value={stateFilter}
+                onChange={(e) => setStateFilter(e.target.value)}
+              >
+                <option value="all">All states</option>
+                {states.map((s) => (
+                  <option key={s.code} value={s.code}>
+                    {s.name} ({s.code})
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+        )}
         <nav className="dash-tabs" aria-label="State dashboard views">
           <button
             type="button"
@@ -539,7 +598,11 @@ export default function StateDashboard() {
       {!loading && !error && view === 'assign' && (
         <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
           <main className="dash-main">
-            <FirmBulkAssign firms={firms} onFirmsChanged={() => void loadAll()} />
+            <FirmBulkAssign
+              firms={firms}
+              onFirmsChanged={() => void loadAll()}
+              stateCode={effectiveScope}
+            />
           </main>
         </div>
       )}

@@ -184,7 +184,7 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
                 setError(null);
               }}
             >
-              Firm admin
+              Admin
             </button>
           </div>
 
@@ -295,7 +295,7 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
             <div role="tabpanel">
               {offline && (
                 <div className="login-note" role="status">
-                  Firm admin sign-in requires an internet connection.
+                  Admin sign-in requires an internet connection.
                 </div>
               )}
 
