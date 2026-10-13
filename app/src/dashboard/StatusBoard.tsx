@@ -5,6 +5,11 @@ import type { Bridge, InspectionDraft } from '../types';
 
 interface StatusBoardProps {
   onSelectBridge: (assetId: string) => void;
+  /** State scope (state_admin sessions): only this state's bridges. */
+  stateCode?: string | null;
+  /** Firm scope (bound firm_admin): only these bridges (the firm's
+   *  group). Null/undefined = no firm restriction. */
+  firmAssetIds?: string[] | null;
 }
 
 type DisplayStatus =
@@ -78,7 +83,11 @@ function hoursSince(iso: string | null): number | null {
   return (Date.now() - t) / 3_600_000;
 }
 
-export default function StatusBoard({ onSelectBridge }: StatusBoardProps) {
+export default function StatusBoard({
+  onSelectBridge,
+  stateCode,
+  firmAssetIds,
+}: StatusBoardProps) {
   const [bridges, setBridges] = useState<Bridge[]>([]);
   const [latestByAsset, setLatestByAsset] = useState<Map<string, LatestRow>>(new Map());
   const [loading, setLoading] = useState(true);
@@ -163,13 +172,27 @@ export default function StatusBoard({ onSelectBridge }: StatusBoardProps) {
     };
   }, []);
 
+  // Bridges in scope: firm group first (bound firm_admin), then state
+  // prefix (state_admin). Everything below derives from these only.
+  const firmAssetSet = useMemo(
+    () => (firmAssetIds ? new Set(firmAssetIds) : null),
+    [firmAssetIds],
+  );
+  const scopedBridges = useMemo(() => {
+    return bridges.filter((b) => {
+      if (firmAssetSet && !firmAssetSet.has(b.asset_id)) return false;
+      if (stateCode && !b.asset_id.startsWith(`${stateCode}-`)) return false;
+      return true;
+    });
+  }, [bridges, firmAssetSet, stateCode]);
+
   const enriched = useMemo(() => {
-    return bridges.map((b) => {
+    return scopedBridges.map((b) => {
       const latest = latestByAsset.get(b.asset_id) ?? null;
       const status: DisplayStatus = latest ? classify(latest) : 'not_started';
       return { bridge: b, latest, status };
     });
-  }, [bridges, latestByAsset]);
+  }, [scopedBridges, latestByAsset]);
 
   const statusCounts = useMemo(() => {
     const counts: Record<DisplayStatus, number> = {
@@ -242,17 +265,32 @@ export default function StatusBoard({ onSelectBridge }: StatusBoardProps) {
     }
   }
 
-  const districts = ['1', '2', '3', '4', '5', '6', '7'];
+  // District options derive ONLY from bridges in scope — never a
+  // hardcoded list that could mix another state's districts in.
+  const districts = useMemo(() => {
+    const set = new Set<string>();
+    for (const b of scopedBridges) {
+      if (b.district) set.add(String(b.district));
+    }
+    return [...set].sort((a, b) => Number(a) - Number(b) || a.localeCompare(b));
+  }, [scopedBridges]);
+
+  // Reset a district selection that no longer exists in scope.
+  useEffect(() => {
+    if (districtFilter !== 'all' && !districts.includes(districtFilter)) {
+      setDistrictFilter('all');
+    }
+  }, [districts, districtFilter]);
 
   return (
     <div className="status-board">
       <h2>Status Board</h2>
 
-      {!loading && bridges.length === 0 && (
+      {!loading && scopedBridges.length === 0 && (
         <p className="muted">Sync bridge inventory from the field app first.</p>
       )}
 
-      {bridges.length > 0 && (
+      {scopedBridges.length > 0 && (
         <>
           <div className="stat-row">
             {STATUS_ORDER.map((s) => (

@@ -129,6 +129,8 @@ export interface StateBridgeRow {
   triage: string | null;
   openStatus: string | null;
   inspectedAt: string | null;
+  lat: number | null;
+  lon: number | null;
 }
 
 export interface BridgeDetail {
@@ -536,9 +538,11 @@ export interface BridgeMeta {
   county_name: string | null;
   facility: string | null;
   feature: string | null;
+  lat: number | null;
+  lon: number | null;
 }
 
-/** County/facility lookup for a set of bridges (chunked). */
+/** County/facility/coordinate lookup for a set of bridges (chunked). */
 export async function getBridgeMeta(assetIds: string[]): Promise<Map<string, BridgeMeta>> {
   const sb = getSupabase();
   const map = new Map<string, BridgeMeta>();
@@ -547,7 +551,7 @@ export async function getBridgeMeta(assetIds: string[]): Promise<Map<string, Bri
   for (let i = 0; i < uniq.length; i += 500) {
     const { data, error } = await sb
       .from('emg_bridges')
-      .select('asset_id,county_name,facility,feature')
+      .select('asset_id,county_name,facility,feature,lat,lon')
       .in('asset_id', uniq.slice(i, i + 500));
     if (error) throw error;
     for (const r of (data ?? []) as unknown as BridgeMeta[]) {
@@ -556,6 +560,8 @@ export async function getBridgeMeta(assetIds: string[]): Promise<Map<string, Bri
         county_name: r.county_name ?? null,
         facility: r.facility ?? null,
         feature: r.feature ?? null,
+        lat: typeof r.lat === 'number' ? r.lat : null,
+        lon: typeof r.lon === 'number' ? r.lon : null,
       });
     }
   }
@@ -590,6 +596,8 @@ export async function buildStateBridgeRows(data: StateData): Promise<StateBridge
         triage: insp?.triage_list ?? null,
         openStatus: insp?.remain_open ?? null,
         inspectedAt: insp?.inspection_datetime ?? null,
+        lat: m?.lat ?? null,
+        lon: m?.lon ?? null,
       };
     })
     .sort((a, b) => a.asset_id.localeCompare(b.asset_id));

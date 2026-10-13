@@ -121,25 +121,24 @@ export async function resolveBridgeIds(
 
 /**
  * Parse pasted/CSV text into a list of raw IDs.
- * Accepts one ID per line, or a single-column CSV (first column used,
- * header row auto-skipped).
+ * Accepts IDs separated by commas, spaces, tabs, semicolons, or
+ * newlines (paste a list in any of those shapes, or upload a CSV —
+ * single column, header row auto-skipped).
  */
 export function parseIdList(text: string): string[] {
   const lines = text.split(/\r?\n/);
   const ids: string[] = [];
   for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-    // First column only; strip surrounding quotes.
-    const first = line
-      .split(/[,;\t]/)[0]
-      .trim()
-      .replace(/^"|"$/g, '')
-      .trim();
-    if (!first) continue;
-    // Skip a header row that looks like a column label.
-    if (i === 0 && /^(id|asset|bridge|struct)/i.test(first)) continue;
-    ids.push(first);
+    const tokens = lines[i]
+      .split(/[\s,;\t]+/)
+      .map((t) => t.replace(/^"|"$/g, '').trim())
+      .filter(Boolean);
+    if (tokens.length === 0) continue;
+    // Skip a header line that looks like a column label.
+    if (i === 0 && /^(id|asset|bridge|struct)/i.test(tokens[0]) && tokens.length === 1) continue;
+    // IDs always contain a digit; this also keeps extra CSV columns
+    // (facility / county words) from being treated as bridge IDs.
+    ids.push(...tokens.filter((t) => /\d/.test(t)));
   }
   return ids;
 }

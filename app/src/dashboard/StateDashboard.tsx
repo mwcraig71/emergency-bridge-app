@@ -186,12 +186,21 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
     return out;
   }, [data, firmColorMap]);
 
+  // County options come only from bridges already in scope (the loaded
+  // rows are state-scoped), so picking NC can never list SC counties.
+  const countyOptions = useMemo(() => {
+    const names = new Set<string>();
+    for (const r of rows) {
+      if (r.county) names.add(r.county);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [rows]);
+
   // Filtered bridge rows (drives the table and the map filter).
   const filteredRows = useMemo(() => {
-    const county = countyFilter.trim().toLowerCase();
     return rows.filter((r) => {
       if (firmFilter !== 'all' && r.firm_id !== firmFilter) return false;
-      if (county && !(r.county ?? '').toLowerCase().includes(county)) return false;
+      if (countyFilter && (r.county ?? '') !== countyFilter) return false;
       if (statusFilter !== 'all') {
         if (statusFilter === 'not-started') {
           if (r.triage) return false;
@@ -209,10 +218,40 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
 
   // Map filter: cap at 8000 assets so the GeoJSON stays responsive.
   const mapFilterIds = useMemo<string[] | null>(() => {
-    const anyFilter = firmFilter !== 'all' || countyFilter.trim() || statusFilter !== 'all';
+    const anyFilter = firmFilter !== 'all' || countyFilter || statusFilter !== 'all';
     if (!anyFilter) return null;
     return filteredRows.slice(0, 8000).map((r) => r.asset_id);
   }, [filteredRows, firmFilter, countyFilter, statusFilter]);
+
+  // Region the map should frame: the bridges currently in view (which
+  // are the selected state's bridges whenever a state is selected).
+  // The key changes only when the scope/filters change.
+  const mapFit = useMemo(() => {
+    let minLon = Infinity;
+    let minLat = Infinity;
+    let maxLon = -Infinity;
+    let maxLat = -Infinity;
+    let n = 0;
+    for (const r of filteredRows) {
+      if (typeof r.lon !== 'number' || typeof r.lat !== 'number') continue;
+      if (r.lon < minLon) minLon = r.lon;
+      if (r.lon > maxLon) maxLon = r.lon;
+      if (r.lat < minLat) minLat = r.lat;
+      if (r.lat > maxLat) maxLat = r.lat;
+      n += 1;
+    }
+    if (n === 0) return null;
+    // Single point / degenerate bounds: pad so fitBounds has an area.
+    const padLon = maxLon - minLon < 0.01 ? 0.01 : 0;
+    const padLat = maxLat - minLat < 0.01 ? 0.01 : 0;
+    return {
+      key: `${effectiveScope ?? 'all'}|${firmFilter}|${countyFilter}|${statusFilter}`,
+      bounds: [
+        [minLon - padLon, minLat - padLat],
+        [maxLon + padLon, maxLat + padLat],
+      ] as [[number, number], [number, number]],
+    };
+  }, [filteredRows, effectiveScope, firmFilter, countyFilter, statusFilter]);
 
   // Firm-scoped overview cards when a firm is selected.
   const scopedProgress: FirmProgress | null = useMemo(() => {
@@ -259,15 +298,35 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
             {scopeName ?? stateScope} — showing only this state&rsquo;s firms
             and bridges.
           </p>
-        ) : (
-          <div style={{ marginTop: 8 }}>
-            <label
-              style={{
-                display: 'inline-flex',
-                flexDirection: 'column',
-                gap: 4,
-              }}
+        ) : null}
+        <div className="state-tabs-row">
+          <nav className="dash-tabs" aria-label="State dashboard views">
+            <button
+              type="button"
+              className={view === 'overview' ? 'active' : ''}
+              onClick={() => setView('overview')}
             >
+              Overview
+            </button>
+            <button
+              type="button"
+              className={view === 'assign' ? 'active' : ''}
+              onClick={() => setView('assign')}
+            >
+              Assign to firms
+            </button>
+            <button
+              type="button"
+              className={view === 'map' ? 'active' : ''}
+              onClick={() => setView('map')}
+            >
+              Map
+            </button>
+          </nav>
+          {/* State selector lives IN the tabs row, right-aligned — a
+              state_admin (stateScope set) never sees it at all. */}
+          {!stateScope && (
+            <label className="state-select">
               <span className="muted">State</span>
               <select
                 value={stateFilter}
@@ -281,31 +340,8 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
                 ))}
               </select>
             </label>
-          </div>
-        )}
-        <nav className="dash-tabs" aria-label="State dashboard views">
-          <button
-            type="button"
-            className={view === 'overview' ? 'active' : ''}
-            onClick={() => setView('overview')}
-          >
-            Overview
-          </button>
-          <button
-            type="button"
-            className={view === 'assign' ? 'active' : ''}
-            onClick={() => setView('assign')}
-          >
-            Assign to firms
-          </button>
-          <button
-            type="button"
-            className={view === 'map' ? 'active' : ''}
-            onClick={() => setView('map')}
-          >
-            Map
-          </button>
-        </nav>
+          )}
+        </div>
       </header>
 
       {loading && (
@@ -495,15 +531,20 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <span className="muted">County</span>
-                  <input
-                    type="text"
+                  <select
                     value={countyFilter}
                     onChange={(e) => {
                       setCountyFilter(e.target.value);
                       setPage(0);
                     }}
-                    placeholder="e.g. Richland"
-                  />
+                  >
+                    <option value="">All counties</option>
+                    {countyOptions.map((c) => (
+                      <option key={c} value={c}>
+                        {c}
+                      </option>
+                    ))}
+                  </select>
                 </label>
                 <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
                   <span className="muted">Status</span>
@@ -608,7 +649,7 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
       )}
 
       {!loading && !error && view === 'map' && (
-        <div className="dash-grid" style={{ gridTemplateColumns: '1fr 360px' }}>
+        <div className="state-map-layout">
           <main className="dash-main">
             <div className="card" style={{ padding: 8 }}>
               <div
@@ -647,6 +688,7 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
                   colorBy={mapColorBy}
                   firmColorByAsset={firmColorByAsset}
                   filterAssetIds={mapFilterIds}
+                  fitRegion={mapFit}
                   onBridgeClick={handleSelectBridge}
                 />
                 {mapColorBy === 'firm' && (
@@ -698,7 +740,7 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
               </div>
             </div>
           </main>
-          <aside className="dash-sidebar">
+          <div className="state-map-side">
             <div className="card">
               <h2 style={{ marginTop: 0 }}>Bridge detail</h2>
               {!selectedAssetId && (
@@ -797,7 +839,7 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
                 Click a firm to filter the map. Click again to clear.
               </p>
             </div>
-          </aside>
+          </div>
         </div>
       )}
 </div>

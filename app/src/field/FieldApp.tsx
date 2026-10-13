@@ -21,6 +21,7 @@ import {
   syncAssignments,
   syncNotifications,
   getMyAssignments,
+  getAllAssignments,
   getAssignmentForBridge,
   unreadNotificationCount,
   markAssignmentInProgress,
@@ -80,6 +81,9 @@ const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
   const [myAssignments, setMyAssignments] = useState<Assignment[]>([]);
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState<number>(0);
+  // True when no inspector name is known yet and the assignments list is
+  // showing EVERYTHING (fallback) instead of just the user's own.
+  const [showingAllAssignments, setShowingAllAssignments] = useState(false);
   const [crossAssignBridge, setCrossAssignBridge] = useState<{
     bridge: Bridge;
     assignedTo: string;
@@ -177,11 +181,21 @@ const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
   const refreshAssignments = useCallback(async (name: string) => {
     const trimmed = name.trim();
     if (!trimmed) {
-      setMyAssignments([]);
+      // No name known (e.g. an admin opened the field app without ever
+      // setting a Settings name): show ALL assignments rather than an
+      // empty list that looks like there is no work assigned.
+      try {
+        setMyAssignments(await getAllAssignments());
+        setShowingAllAssignments(true);
+      } catch {
+        setMyAssignments([]);
+        setShowingAllAssignments(false);
+      }
       setNotifications([]);
       setUnreadCount(0);
       return;
     }
+    setShowingAllAssignments(false);
     try {
       setMyAssignments(await getMyAssignments(trimmed));
     } catch {
@@ -689,6 +703,23 @@ const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
               </span>
             )}
           </h3>
+          {showingAllAssignments && (
+            <div
+              role="note"
+              style={{
+                background: '#FFF4E5',
+                border: '1px solid #C9A227',
+                borderRadius: 2,
+                padding: '10px 12px',
+                marginBottom: 12,
+                fontWeight: 600,
+                color: '#5C4300',
+              }}
+            >
+              Showing all assignments — set your name in Settings to see only
+              yours.
+            </div>
+          )}
           {myAssignments.length === 0 && (
             <div className="muted">
               No bridges assigned to you yet. Sync to download your
@@ -729,6 +760,11 @@ const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
                       {a.status.replace('_', ' ')}
                     </span>
                     <span style={{ fontWeight: 600 }}>{a.asset_id}</span>
+                    {showingAllAssignments && a.assigned_to && (
+                      <span className="muted" style={{ fontSize: 12 }}>
+                        {a.assigned_to}
+                      </span>
+                    )}
                     {a.status === 'complete' && a.completed_by && (
                       <span className="muted" style={{ fontSize: 12 }}>
                         by {a.completed_by}

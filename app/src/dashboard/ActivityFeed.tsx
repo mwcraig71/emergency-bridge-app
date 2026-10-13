@@ -55,7 +55,14 @@ function shortName(n: string | null | undefined): string {
   return `${parts[0][0]}. ${parts[parts.length - 1]}`;
 }
 
-export default function ActivityFeed(): React.JSX.Element {
+export default function ActivityFeed({
+  firmAssetIds,
+}: {
+  /** Firm scope (bound firm_admin): inspection events are limited to
+   *  bridges in this firm's group. Road closures/paths are a shared
+   *  operational picture and stay visible. Null = no firm restriction. */
+  firmAssetIds?: string[] | null;
+} = {}): React.JSX.Element {
   const [events, setEvents] = useState<FeedEvent[]>([]);
   const [inspectorFilter, setInspectorFilter] = useState<string>('all');
   const [loading, setLoading] = useState<boolean>(true);
@@ -96,8 +103,10 @@ export default function ActivityFeed(): React.JSX.Element {
             .limit(100),
         ]);
 
+        const firmSet = firmAssetIds ? new Set(firmAssetIds) : null;
         const merged: FeedEvent[] = [];
         for (const r of (insp.data ?? []) as InspectionRow[]) {
+          if (firmSet && (!r.asset_id || !firmSet.has(r.asset_id))) continue;
           const t = r.inspection_datetime ?? null;
           const who = shortName(r.inspector_name);
           const triage = r.triage_list ? ` — ${r.triage_list}` : '';
@@ -153,7 +162,7 @@ export default function ActivityFeed(): React.JSX.Element {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [firmAssetIds]);
 
   const inspectors = useMemo(() => {
     const set = new Set<string>();

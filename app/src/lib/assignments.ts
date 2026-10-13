@@ -3,7 +3,7 @@
 // so the field app can warn on cross-assignment inspections offline.
 import { getSupabase, isOnline, isSupabaseConfigured } from './supabase';
 import { idbBulkPut, idbGetAll, idbPut } from './idb';
-import { getCurrentFirmId, withFirmFilter } from './firm';
+import { getCurrentFirmId } from './firm';
 import type { AppNotification, Assignment } from '../types';
 
 const ASSIGNMENT_SELECT =
@@ -47,13 +47,17 @@ function rowToNotification(r: Record<string, unknown>): AppNotification {
  * Download all assignments into the IndexedDB `assignments` store.
  * Server rows are deduped by asset_id, keeping the latest assigned_at —
  * the local store is keyed by asset_id (one active assignment per bridge).
+ *
+ * Assignments with firm_id NULL are legacy rows; they are always kept —
+ * they are never hidden by a firm filter (callers filter at read time).
  */
 export async function syncAssignments(): Promise<number> {
   const sb = getSupabase();
   if (!sb) throw new Error('Supabase is not configured');
-  const { data, error } = await withFirmFilter(
-    sb.from('emg_assignments').select(ASSIGNMENT_SELECT),
-  ).order('assigned_at', { ascending: false });
+  const { data, error } = await sb
+    .from('emg_assignments')
+    .select(ASSIGNMENT_SELECT)
+    .order('assigned_at', { ascending: false });
   if (error) throw error;
   const seen = new Set<string>();
   const rows: Assignment[] = [];
@@ -93,8 +97,25 @@ export async function syncNotifications(
   return rows.length;
 }
 
+/**
+ * Every cached assignment, unfiltered (any assignee, any firm).
+ * Used as a fallback in the field app when the inspector name is not
+ * known yet — the user still needs to see the work exists.
+ */
+export async function getAllAssignments(): Promise<Assignment[]> {
+  const all = await idbGetAll<Assignment>('assignments');
+  const rank = (s: Assignment['status']) =>
+    s === 'assigned' ? 0 : s === 'in_progress' ? 1 : 2;
+  all.sort(
+    (a, b) => rank(a.status) - rank(b.status) || a.asset_id.localeCompare(b.asset_id),
+  );
+  return all;
+}
+
 /** Assignments for one inspector, active (non-complete) first.
- *  When a firm is active, only that firm's assignments are returned. */
+ *  When a firm is active, that firm's assignments are returned PLUS
+ *  assignments with firm_id NULL — legacy rows with no firm are never
+ *  hidden by a firm filter. */
 export async function getMyAssignments(
   inspectorName: string,
 ): Promise<Assignment[]> {
@@ -104,7 +125,7 @@ export async function getMyAssignments(
   const mine = all.filter(
     (a) =>
       a.assigned_to.trim().toLowerCase() === name &&
-      (firmId == null || a.firm_id === firmId),
+      (firmId == null || a.firm_id === firmId || a.firm_id == null),
   );
   const rank = (s: Assignment['status']) =>
     s === 'assigned' ? 0 : s === 'in_progress' ? 1 : 2;

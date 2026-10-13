@@ -10,6 +10,7 @@ import TeamRoster from './TeamRoster';
 import AdminManager from './AdminManager';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import { idbGetAll } from '../lib/idb';
+import { getFirmBridges } from '../lib/firm';
 import type { AdminProfile, Bridge } from '../types';
 
 interface BridgeInspection {
@@ -45,10 +46,42 @@ export default function Dashboard({
     adminProfile?.role === 'state_admin'
       ? (adminProfile.stateCode ?? null)
       : null;
+
+  // Firm lock: a firm_admin whose profile (or session) is bound to one
+  // firm is pinned to it — no firm switcher anywhere, and every panel
+  // below is scoped to that firm. super_admin / state_admin are unbound.
+  const boundFirmId =
+    adminProfile?.role === 'firm_admin'
+      ? (adminProfile.firmId ?? firmId ?? null)
+      : null;
+  const firmLocked = boundFirmId != null;
+  const effectiveFirmId = boundFirmId ?? firmId ?? null;
+  // The locked firm's bridge group (asset ids) — scopes the map, the
+  // status board, the activity feed, and bridge-detail access.
+  const [firmAssetIds, setFirmAssetIds] = useState<string[] | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!firmLocked || !effectiveFirmId) {
+      setFirmAssetIds(null);
+      return;
+    }
+    getFirmBridges(effectiveFirmId)
+      .then((ids) => {
+        if (!cancelled) setFirmAssetIds(ids);
+      })
+      .catch(() => {
+        if (!cancelled) setFirmAssetIds([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [firmLocked, effectiveFirmId]);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [bridge, setBridge] = useState<Bridge | null>(null);
   const [inspections, setInspections] = useState<BridgeInspection[] | null>(null);
   const [loadingDetail, setLoadingDetail] = useState(false);
+  /** True when a locked firm_admin selected a bridge outside their firm. */
+  const [detailBlocked, setDetailBlocked] = useState(false);
   const [view, setView] = useState<'overview' | 'upload' | 'assignments' | 'team' | 'admins'>('overview');
 
   const handleSelectBridge = useCallback((assetId: string) => {
@@ -59,8 +92,25 @@ export default function Dashboard({
     if (!selectedAssetId) {
       setBridge(null);
       setInspections(null);
+      setDetailBlocked(false);
       return;
     }
+    // Firm lock: never surface another firm's bridge, even by direct
+    // selection. Wait for the firm's bridge group before deciding.
+    if (firmLocked) {
+      if (firmAssetIds === null) {
+        setLoadingDetail(true);
+        return;
+      }
+      if (!firmAssetIds.includes(selectedAssetId)) {
+        setBridge(null);
+        setInspections([]);
+        setDetailBlocked(true);
+        setLoadingDetail(false);
+        return;
+      }
+    }
+    setDetailBlocked(false);
     let cancelled = false;
 
     async function loadDetail() {
@@ -120,7 +170,7 @@ export default function Dashboard({
     return () => {
       cancelled = true;
     };
-  }, [selectedAssetId]);
+  }, [selectedAssetId, firmLocked, firmAssetIds]);
 
   return (
     <div className="dash">
@@ -177,14 +227,18 @@ export default function Dashboard({
       ) : view === 'assignments' ? (
         <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
           <main className="dash-main">
-            <AssignmentsPanel />
+            <AssignmentsPanel
+              firmId={effectiveFirmId ?? undefined}
+              firmLocked={firmLocked}
+              adminProfile={adminProfile}
+            />
           </main>
         </div>
       ) : view === 'team' ? (
         <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
           <main className="dash-main">
             <TeamRoster
-              firmId={firmId}
+              firmId={effectiveFirmId ?? undefined}
               firmName={firmName}
               stateCode={rosterStateCode}
             />
@@ -197,13 +251,28 @@ export default function Dashboard({
           </main>
         </div>
       ) : (
+      <>
+      {/* Operations map — full content width so progress is readable. */}
+      <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
+        <main className="dash-main">
+          <div className="card" style={{ marginBottom: 0 }}>
+            <TeamMap
+              showTeam
+              height="62vh"
+              onBridgeClick={handleSelectBridge}
+              filterAssetIds={firmLocked ? firmAssetIds : null}
+            />
+          </div>
+        </main>
+      </div>
       <div className="dash-grid">
         <main className="dash-main">
           <div className="card">
-            <TeamMap showTeam height="62vh" onBridgeClick={handleSelectBridge} />
-          </div>
-          <div className="card">
-            <StatusBoard onSelectBridge={handleSelectBridge} />
+            <StatusBoard
+              onSelectBridge={handleSelectBridge}
+              stateCode={rosterStateCode}
+              firmAssetIds={firmLocked ? firmAssetIds : null}
+            />
           </div>
         </main>
 
@@ -215,10 +284,11 @@ export default function Dashboard({
             <RoadNetworkPanel />
           </div>
           <div className="card">
-            <ActivityFeed />
+            <ActivityFeed firmAssetIds={firmLocked ? firmAssetIds : null} />
           </div>
         </aside>
       </div>
+      </>
       )}
 
       {selectedAssetId && (
@@ -239,7 +309,16 @@ export default function Dashboard({
               </button>
             </div>
 
-            {!bridge && <p className="muted">Loading bridge inventory…</p>}
+            {detailBlocked && (
+              <p className="muted">
+                This bridge is not in your firm&rsquo;s group, so its details
+                are not available in firm operations.
+              </p>
+            )}
+
+            {!bridge && !detailBlocked && (
+              <p className="muted">Loading bridge inventory…</p>
+            )}
 
             {bridge && (
               <div className="bridge-fields">

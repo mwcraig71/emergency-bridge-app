@@ -18,11 +18,11 @@ import { getSupabase } from './lib/supabase';
 function adminRoleLabel(profile: AdminProfile): string {
   switch (profile.role) {
     case 'super_admin':
-      return 'Super admin';
+      return 'Super Admin';
     case 'state_admin':
-      return `State admin${profile.stateCode ? ` — ${profile.stateCode}` : ''}`;
+      return `State Admin${profile.stateCode ? ` — ${profile.stateCode}` : ''}`;
     case 'firm_admin':
-      return 'Firm admin';
+      return 'Firm Admin';
   }
 }
 
@@ -70,9 +70,7 @@ function EnvNav({
               State ops
             </Link>
           )}
-          <span className="env-user">
-            {profile.email} · {adminRoleLabel(profile)}
-          </span>
+          <span className="env-user">{adminRoleLabel(profile)}</span>
         </>
       ) : (
         <span className="env-user">Signed in as {session.kind === 'inspector' ? session.inspectorName : ''}</span>

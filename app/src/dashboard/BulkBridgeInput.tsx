@@ -8,12 +8,19 @@ import {
   type ResolveResult,
 } from '../lib/bridgeLookup';
 import type { Bridge, Bucket } from '../types';
+import InspectorSelect from './InspectorSelect';
 
 function newBucketId(): string {
   return `bucket-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export default function BulkBridgeInput() {
+interface BulkBridgeInputProps {
+  /** Current firm (firm ops). Its roster fills the inspector dropdowns;
+   *  assignments are restricted to the firm's bridge group when set. */
+  firmId?: string | null;
+}
+
+export default function BulkBridgeInput({ firmId }: BulkBridgeInputProps) {
   const [state, setState] = useState<BridgeState>('SC');
   const [pasteText, setPasteText] = useState('');
   const [bucketName, setBucketName] = useState('');
@@ -47,7 +54,9 @@ export default function BulkBridgeInput() {
   const handleResolve = async () => {
     const ids = parseIdList(pasteText);
     if (ids.length === 0) {
-      setMessage('Paste bridge IDs (one per line) or upload a CSV first.');
+      setMessage(
+        'Paste bridge IDs (separated by commas, spaces, or newlines) or upload a CSV first.',
+      );
       return;
     }
     if (!configured) {
@@ -57,7 +66,7 @@ export default function BulkBridgeInput() {
     setResolving(true);
     setMessage(null);
     try {
-      const result = await resolveBridgeIds(ids, state);
+      const result = await resolveBridgeIds(ids, state, firmId ?? undefined);
       setResolved(result);
       setPerBridgeInspector({});
       if (result.found.length === 0) {
@@ -184,7 +193,11 @@ export default function BulkBridgeInput() {
     setResolving(true);
     setMessage(null);
     try {
-      const result = await resolveBridgeIds(bucket.asset_ids, bucket.state);
+      const result = await resolveBridgeIds(
+        bucket.asset_ids,
+        bucket.state,
+        firmId ?? undefined,
+      );
       setResolved(result);
       setPerBridgeInspector({ ...bucket.inspector_map });
       setBulkInspector('');
@@ -270,15 +283,16 @@ export default function BulkBridgeInput() {
           value={pasteText}
           onChange={(e) => setPasteText(e.target.value)}
           placeholder={
-            'One bridge ID per line, e.g.\n1892\nSC-1892\n000000000001892'
+            'Paste bridge IDs — separated by commas, spaces, or newlines, e.g.\n1892, SC-1893 000000000001894'
           }
           rows={8}
           style={{ width: '100%', fontFamily: 'monospace', fontSize: 13 }}
           disabled={resolving || saving}
         />
         <p className="muted" style={{ marginBottom: 0 }}>
-          Accepts asset IDs (1892, SC-1892) and SC structure numbers
-          (000000000001892). CSV: single column, header optional.
+          Import CSV or paste a list: accepts asset IDs (1892, SC-1892) and
+          SC structure numbers (000000000001892), separated by commas, spaces,
+          or newlines. CSV: single column, header optional.
         </p>
       </div>
 
@@ -319,12 +333,12 @@ export default function BulkBridgeInput() {
                   style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
                 >
                   <span className="muted">Inspector for all</span>
-                  <input
-                    type="text"
+                  <InspectorSelect
+                    firmId={firmId}
                     value={bulkInspector}
-                    onChange={(e) => setBulkInspector(e.target.value)}
-                    placeholder="Optional — applies to all"
+                    onChange={setBulkInspector}
                     disabled={saving}
+                    placeholder="Optional — applies to all"
                   />
                 </label>
                 <button
@@ -355,18 +369,22 @@ export default function BulkBridgeInput() {
                         <td>{b.facility ?? '—'}</td>
                         <td>{b.county_name ?? '—'}</td>
                         <td>
-                          <input
-                            type="text"
+                          <InspectorSelect
+                            firmId={firmId}
                             value={perBridgeInspector[b.asset_id] ?? ''}
-                            onChange={(e) =>
+                            onChange={(v) =>
                               setPerBridgeInspector((prev) => ({
                                 ...prev,
-                                [b.asset_id]: e.target.value,
+                                [b.asset_id]: v,
                               }))
                             }
-                            placeholder={bulkInspector || 'Inspector'}
+                            placeholder={
+                              bulkInspector
+                                ? `All: ${bulkInspector}`
+                                : 'Inspector'
+                            }
                             disabled={saving}
-                            style={{ minWidth: 120 }}
+                            style={{ minWidth: 150 }}
                           />
                         </td>
                       </tr>

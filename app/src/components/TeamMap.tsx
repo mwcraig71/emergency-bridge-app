@@ -61,6 +61,16 @@ interface TeamMapProps {
   filterAssetIds?: string[] | null;
   position?: { lon: number; lat: number } | null;
   height?: string;
+  /**
+   * Fit the map view to these lon/lat bounds (e.g. the bridges of the
+   * currently selected state). `key` should change whenever the region
+   * changes (state/filter), so re-fits happen on scope changes only —
+   * manual pans in between are not overridden.
+   */
+  fitRegion?: {
+    key: string;
+    bounds: [[number, number], [number, number]];
+  } | null;
   onBridgeClick?: (assetId: string) => void;
   /** Field-app actions for the built-in bridge info sheet. Shown only when set. */
   onStartInspection?: (bridge: Bridge) => void;
@@ -304,6 +314,7 @@ export default function TeamMap({
   firmColorByAsset,
   filterAssetIds,
   position = null,
+  fitRegion = null,
   height = '60dvh',
   onBridgeClick,
   onStartInspection,
@@ -570,8 +581,15 @@ export default function TeamMap({
           style: style as maplibregl.StyleSpecification | string,
           center,
           zoom,
-          attributionControl: { compact: true },
+          attributionControl: false,
         });
+        // Attribution lives bottom-LEFT (compact): the legend sits
+        // bottom-right and the DriveNC toggles top-left, so no two
+        // overlays share a corner and they can never collide.
+        map.addControl(
+          new maplibregl.AttributionControl({ compact: true }),
+          'bottom-left',
+        );
       } catch {
         setStyleError(true);
         return;
@@ -1775,6 +1793,22 @@ export default function TeamMap({
     positionRef.current = position ?? null;
   }, [position]);
 
+  // Fit the view to a requested region (state dashboard: the selected
+  // state's bridges) whenever its key changes. Manual pan/zoom between
+  // key changes is untouched.
+  const lastFitKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || !ready || !fitRegion) return;
+    if (lastFitKeyRef.current === fitRegion.key) return;
+    lastFitKeyRef.current = fitRegion.key;
+    try {
+      map.fitBounds(fitRegion.bounds, { padding: 48, maxZoom: 12 });
+    } catch {
+      // ignore — a bad bounds must not break the map
+    }
+  }, [ready, fitRegion]);
+
   // GPS dot
   useEffect(() => {
     const map = mapRef.current;
@@ -1998,12 +2032,14 @@ export default function TeamMap({
         </div>
       )}
 
-      {/* Legend */}
+      {/* Legend — bottom-RIGHT (offset so the locate control keeps the
+          corner edge): DriveNC toggles are top-left, attribution is
+          bottom-left, so the legend never overlaps either. */}
       <div
         style={{
           position: 'absolute',
           bottom: 8,
-          left: 8,
+          right: 56,
           zIndex: 5,
           background: 'rgba(0,26,82,0.92)',
           color: '#FFFFFF',
