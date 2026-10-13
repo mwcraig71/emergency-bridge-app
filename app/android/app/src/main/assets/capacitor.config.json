@@ -1,0 +1,15 @@
+{
+	"appId": "com.strinteg.emergencybridge",
+	"appName": "Emergency Bridge Inspection",
+	"webDir": "dist",
+	"backgroundColor": "#1a3a5c",
+	"android": {
+		"allowMixedContent": false
+	},
+	"plugins": {
+		"CapacitorUpdater": {
+			"autoUpdate": true,
+			"resetWhenUpdate": false
+		}
+	}
+}
