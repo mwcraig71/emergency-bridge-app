@@ -10,10 +10,14 @@ const config: CapacitorConfig = {
   },
   plugins: {
     // Over-the-air updates via @capgo/capacitor-updater.
-    // Set VITE_OTA_UPDATE_URL to the update manifest endpoint (see docs/OTA-UPDATES.md).
+    // Self-hosted on GitHub Pages (see docs/OTA-UPDATES.md, Option B).
+    // The plugin polls updateUrl natively — this must live here, not only
+    // in VITE_OTA_UPDATE_URL, or autoUpdate silently targets Capgo cloud.
     CapacitorUpdater: {
       autoUpdate: true,
       resetWhenUpdate: false,
+      updateUrl:
+        'https://mwcraig71.github.io/emergency-bridge-app/ota/manifest.json',
     },
   },
 };
