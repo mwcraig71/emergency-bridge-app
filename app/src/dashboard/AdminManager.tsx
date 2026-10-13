@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
-import { getCachedFirms, syncFirms } from '../lib/firm';
+import { firmServesState, getCachedFirms, syncFirms } from '../lib/firm';
 import { loadStates } from '../lib/stateDashboard';
 import type {
   AdminProfile,
@@ -109,7 +109,7 @@ export default function AdminManager({ profile }: AdminManagerProps) {
       if (a.role === 'state_admin') return a.state_code === myState;
       if (a.role === 'firm_admin') {
         const f = a.firm_id ? firmById.get(a.firm_id) : undefined;
-        return f?.state_code === myState;
+        return f !== undefined && myState !== null && firmServesState(f, myState);
       }
       return false; // super_admin rows are not shown to state admins
     });
@@ -118,7 +118,7 @@ export default function AdminManager({ profile }: AdminManagerProps) {
   /** Firms offered in the add form's firm picker. */
   const firmOptions = useMemo(() => {
     if (isSuper) return firms;
-    return firms.filter((f) => f.state_code === myState);
+    return firms.filter((f) => myState !== null && firmServesState(f, myState));
   }, [firms, isSuper, myState]);
 
   const roleOptions: AdminRole[] = isSuper
@@ -129,7 +129,8 @@ export default function AdminManager({ profile }: AdminManagerProps) {
     if (a.role === 'super_admin') return 'All states';
     if (a.role === 'state_admin') return stateName(a.state_code);
     const f = a.firm_id ? firmById.get(a.firm_id) : undefined;
-    return f ? f.name : '—';
+    if (!f) return '—';
+    return f.states.length > 0 ? `${f.name} (${f.states.join(', ')})` : f.name;
   };
 
   const requireOnline = (): boolean => {
@@ -339,6 +340,7 @@ export default function AdminManager({ profile }: AdminManagerProps) {
               {firmOptions.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.name}
+                  {f.states.length > 0 ? ` (${f.states.join(', ')})` : ''}
                 </option>
               ))}
             </select>

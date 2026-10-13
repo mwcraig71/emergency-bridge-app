@@ -8,7 +8,7 @@
 // This module aggregates cross-firm progress for state emergency managers:
 // per-firm completion, condition rollups, and bridge-to-firm assignment.
 import { getSupabase, isSupabaseConfigured, isOnline } from './supabase';
-import { syncFirms, getCachedFirms } from './firm';
+import { syncFirms, getCachedFirms, firmServesState } from './firm';
 import type { EmgState, Firm } from '../types';
 
 /**
@@ -179,10 +179,11 @@ export interface StateData {
 /**
  * Load every firm + bridge mapping + inspection + assignment row.
  * When `stateCode` is given, the result is scoped to that state:
- * firms with that state_code, their bridge mappings (additionally
- * prefix-checked against asset_id), and inspections/assignments for
- * bridges in that state. Firms with no state assigned appear only in
- * the unscoped (super admin) view.
+ * firms serving that state (firm_states, migration 016 — a multi-state
+ * firm is in scope for EACH of its states), their bridge mappings
+ * (additionally prefix-checked against asset_id), and
+ * inspections/assignments for bridges in that state. Firms with no
+ * states assigned appear only in the unscoped (super admin) view.
  */
 export async function loadStateData(stateCode?: string | null): Promise<StateData> {
   const online = isOnline() && isSupabaseConfigured();
@@ -190,7 +191,7 @@ export async function loadStateData(stateCode?: string | null): Promise<StateDat
   const cached = firms.length > 0 ? firms : await getCachedFirms().catch(() => []);
   if (!online) {
     return {
-      firms: stateCode ? cached.filter((f) => f.state_code === stateCode) : cached,
+      firms: stateCode ? cached.filter((f) => firmServesState(f, stateCode)) : cached,
       firmBridges: [],
       inspections: [],
       assignments: [],
@@ -215,7 +216,7 @@ export async function loadStateData(stateCode?: string | null): Promise<StateDat
   ]);
   const all: StateData = { firms: cached, firmBridges, inspections, assignments };
   if (!stateCode) return all;
-  const scopedFirms = cached.filter((f) => f.state_code === stateCode);
+  const scopedFirms = cached.filter((f) => firmServesState(f, stateCode));
   const scopedFirmIds = new Set(scopedFirms.map((f) => f.id));
   return {
     firms: scopedFirms,
@@ -476,7 +477,8 @@ export async function unassignBridgesFromFirm(
 }
 
 /** Create a firm. When created from a state-scoped view, pass the
- *  state so the firm is born assigned to it. */
+ *  state so the firm is born serving it (a firm_states row, migration
+ *  016 — firms.state_code is deprecated and no longer written). */
 export async function createFirm(
   name: string,
   stateCode?: string | null,
@@ -487,18 +489,24 @@ export async function createFirm(
   if (!clean) throw new Error('Firm name is required');
   const { data, error } = await sb
     .from('firms')
-    .insert(
-      stateCode ? { name: clean, state_code: stateCode } : { name: clean },
-    )
-    .select('id,name,created_at,state_code')
+    .insert({ name: clean })
+    .select('id,name,created_at')
     .single();
   if (error) throw error;
   const f = data as unknown as Firm;
+  const states: string[] = [];
+  if (stateCode) {
+    const { error: fsError } = await sb
+      .from('firm_states')
+      .insert({ firm_id: f.id, state_code: stateCode });
+    if (fsError) throw fsError;
+    states.push(stateCode);
+  }
   return {
     id: String(f.id),
     name: String(f.name),
     created_at: String(f.created_at ?? ''),
-    state_code: f.state_code ? String(f.state_code) : null,
+    states,
   };
 }
 

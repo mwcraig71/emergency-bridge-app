@@ -186,6 +186,7 @@ export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Pro
             {firms.map((f) => (
               <span key={f.id} className="pill" style={{ fontSize: 13 }}>
                 {f.name}
+                {f.states.length > 0 ? ` (${f.states.join(', ')})` : ''}
               </span>
             ))}
           </div>
@@ -254,6 +255,7 @@ export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Pro
               {firms.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.name}
+                  {f.states.length > 0 ? ` (${f.states.join(', ')})` : ''}
                 </option>
               ))}
             </select>

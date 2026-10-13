@@ -21,7 +21,18 @@ import type { Firm, Inspector } from '../types';
 
 const FIRM_ID_STORAGE_KEY = 'emg.firm_id';
 
-const FIRM_SELECT = 'id,name,created_at,state_code';
+const FIRM_SELECT = 'id,name,created_at';
+const FIRM_STATES_SELECT = 'firm_id,state_code';
+
+/** Does this firm serve the given state? (firm_states, migration 016.) */
+export function firmServesState(firm: Firm, stateCode: string): boolean {
+  return (firm.states ?? []).includes(stateCode);
+}
+
+/** "NC, SC" style label for a firm's states ('' when none assigned). */
+export function formatFirmStates(firm: Firm): string {
+  return (firm.states ?? []).join(', ');
+}
 // The salted SHA-256 PIN hash IS selected by clients: it is cached in
 // IndexedDB so offline inspector login can verify PINs with zero network
 // calls (see lib/auth.ts). The salt is the inspector id (stored in the same
@@ -76,11 +87,26 @@ export async function syncFirms(): Promise<Firm[]> {
     .select(FIRM_SELECT)
     .order('name');
   if (error) throw error;
+  // Firm↔state membership lives in the firm_states junction
+  // (migration 016); attach each firm's state list to its row.
+  const statesByFirm = new Map<string, string[]>();
+  const { data: fsData, error: fsError } = await sb
+    .from('firm_states')
+    .select(FIRM_STATES_SELECT)
+    .order('state_code');
+  if (fsError) throw fsError;
+  for (const r of (fsData ?? []) as unknown as
+    { firm_id: string; state_code: string }[]) {
+    const fid = String(r.firm_id);
+    const list = statesByFirm.get(fid) ?? [];
+    list.push(String(r.state_code));
+    statesByFirm.set(fid, list);
+  }
   const rows = ((data ?? []) as unknown as Firm[]).map((f) => ({
     id: String(f.id),
     name: String(f.name ?? ''),
     created_at: String(f.created_at ?? ''),
-    state_code: f.state_code ? String(f.state_code) : null,
+    states: statesByFirm.get(String(f.id)) ?? [],
   }));
   await idbBulkPut('firms', rows);
   return rows;
@@ -159,5 +185,12 @@ export async function getFirmBridges(
  */
 export async function getCachedFirms(): Promise<Firm[]> {
   const all = await idbGetAll<Firm>('firms');
-  return all.sort((a, b) => a.name.localeCompare(b.name));
+  // Normalize rows cached before migration 016 (no `states` array yet)
+  // so readers can always rely on the field being present.
+  return all
+    .map((f) => ({
+      ...f,
+      states: Array.isArray(f.states) ? f.states.map(String) : [],
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }

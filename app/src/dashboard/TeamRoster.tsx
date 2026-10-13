@@ -1,6 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
-import { getCachedFirms, getFirmInspectors, syncInspectors } from '../lib/firm';
+import {
+  firmServesState,
+  getCachedFirms,
+  getFirmInspectors,
+  syncInspectors,
+} from '../lib/firm';
 import { hashPin } from '../lib/auth';
 import type { Firm, Inspector } from '../types';
 
@@ -58,7 +63,7 @@ export default function TeamRoster({ firmId, firmName, stateCode }: TeamRosterPr
       const all = await getCachedFirms();
       // State admins only see firms in their state.
       const list = stateCode
-        ? all.filter((f) => f.state_code === stateCode)
+        ? all.filter((f) => firmServesState(f, stateCode))
         : all;
       if (cancelled) return;
       setFirms(list);

@@ -250,14 +250,21 @@ export interface AppNotification {
 }
 
 /** Firm (tenant). Firms receive groups of bridges and assign them to
- *  inspector teams within the firm. state_code is the state the firm
- *  operates in (migration 015); null until a state/overall admin
- *  assigns one — never assume a firm's state. */
+ *  inspector teams within the firm. `states` lists the state codes the
+ *  firm serves (firm_states junction, migration 016 — a firm may serve
+ *  several states). Empty until a state/overall admin assigns states —
+ *  never assume a firm's states. */
 export interface Firm {
   id: string;
   name: string;
   created_at: string;
-  state_code?: string | null;
+  states: string[];
+}
+
+/** One firm↔state membership row (firm_states, migration 016). */
+export interface FirmState {
+  firm_id: string;
+  state_code: string;
 }
 
 /** A state that runs an inspection program (emg_states, migration 015). */
