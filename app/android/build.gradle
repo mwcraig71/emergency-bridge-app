@@ -28,22 +28,3 @@ task clean(type: Delete) {
     delete rootProject.buildDir
 }
 
-// CI runs Gradle on JDK 17 (workflow setup), but the Capacitor Android
-// library declares source release 21, which javac 17 rejects
-// ("error: invalid source release: 21"). Capacitor's Java sources use no
-// Java 21 language features, so force all JavaCompile tasks to release 17.
-// Applied in projectsEvaluated so it lands after AGP's own configuration.
-gradle.projectsEvaluated {
-    // Diagnostic: list JDK install dirs so CI logs show what is available.
-    ['/usr/lib/jvm', '/opt/hostedtoolcache/Java_Temurin-Hotspot_jdk'].each { dir ->
-        def f = new File(dir)
-        println "JDK-DIAG ${dir}: ${f.exists() ? f.list() : 'MISSING'}"
-    }
-    allprojects { proj ->
-        proj.tasks.withType(JavaCompile).all { t ->
-            t.options.release.set(17)
-            t.sourceCompatibility = '17'
-            t.targetCompatibility = '17'
-        }
-    }
-}
