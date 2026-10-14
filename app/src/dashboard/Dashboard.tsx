@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import StatusBoard from './StatusBoard';
 import RoadNetworkPanel from './RoadNetworkPanel';
 import ActivityFeed from './ActivityFeed';
@@ -9,8 +9,22 @@ import TeamRoster from './TeamRoster';
 import AdminManager from './AdminManager';
 import { getSupabase, isOnline, isSupabaseConfigured } from '../lib/supabase';
 import { idbGetAll } from '../lib/idb';
-import { getFirmBridges } from '../lib/firm';
-import type { AdminProfile, Bridge } from '../types';
+import {
+  getFirmBridges,
+  syncFirms,
+  getCachedFirms,
+  firmServesState,
+} from '../lib/firm';
+import {
+  loadStates,
+  loadSharedFirmData,
+  computeFirmProgress,
+  buildFirmColorMap,
+  stateOfAsset,
+  type SharedFirmData,
+  type FirmProgress,
+} from '../lib/stateDashboard';
+import type { AdminProfile, Bridge, EmgState, Firm } from '../types';
 
 interface BridgeInspection {
   id: string;
@@ -25,6 +39,15 @@ interface BridgeInspection {
 function rating(v: unknown): string {
   if (v === null || v === undefined || v === '') return '—';
   return String(v);
+}
+
+/** Cross-firm sharing view model (migration 017) for the firm ops
+ *  overview: the sharing states this firm serves, its own firm record,
+ *  and the other firms' shared data. Null in Dashboard state = off. */
+interface SharingView {
+  states: EmgState[];
+  ownFirm: Firm;
+  data: SharedFirmData;
 }
 
 export default function Dashboard({
@@ -75,6 +98,130 @@ export default function Dashboard({
       cancelled = true;
     };
   }, [firmLocked, effectiveFirmId]);
+
+  // Cross-firm progress sharing (migration 017): when a state this
+  // firm serves has sharing ON, the overview ALSO shows the other
+  // firms serving that state — their bridge groups (that state's
+  // bridges only) and progress, view-only. Null = sharing off for
+  // every state this firm serves, and the overview is exactly the
+  // firm-scoped view it has always been.
+  const [sharing, setSharing] = useState<SharingView | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    if (!firmLocked || !effectiveFirmId) {
+      setSharing(null);
+      return;
+    }
+    (async () => {
+      try {
+        const states = await loadStates();
+        const sharingOn = states.filter((s) => s.share_firm_progress);
+        if (sharingOn.length === 0) {
+          if (!cancelled) setSharing(null);
+          return;
+        }
+        const synced = await syncFirms().catch(() => [] as Firm[]);
+        const allFirms =
+          synced.length > 0
+            ? synced
+            : await getCachedFirms().catch(() => [] as Firm[]);
+        const ownFirm = allFirms.find((f) => f.id === effectiveFirmId) ?? null;
+        if (!ownFirm) {
+          if (!cancelled) setSharing(null);
+          return;
+        }
+        const myStates = sharingOn.filter((s) => firmServesState(ownFirm, s.code));
+        if (myStates.length === 0) {
+          if (!cancelled) setSharing(null);
+          return;
+        }
+        const data = await loadSharedFirmData(
+          effectiveFirmId,
+          myStates.map((s) => s.code),
+        );
+        if (cancelled) return;
+        setSharing(
+          data.firms.length > 0 ? { states: myStates, ownFirm, data } : null,
+        );
+      } catch {
+        if (!cancelled) setSharing(null);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [firmLocked, effectiveFirmId]);
+
+  // Shared (other firms') bridge ids, sharing states only.
+  const sharedAssetIds = useMemo(
+    () =>
+      sharing
+        ? [...new Set(sharing.data.firmBridges.map((fb) => fb.asset_id))]
+        : [],
+    [sharing],
+  );
+  const sharedAssetSet = useMemo(
+    () => new Set(sharedAssetIds),
+    [sharedAssetIds],
+  );
+
+  // Bridge set for the overview map + status board: the firm's own
+  // group, plus shared bridges when sharing is active. When sharing
+  // is off this is exactly firmAssetIds, unchanged.
+  const overviewAssetIds = useMemo(() => {
+    if (!firmLocked || firmAssetIds === null) return null;
+    if (!sharing) return firmAssetIds;
+    const own = new Set(firmAssetIds);
+    return [...firmAssetIds, ...sharedAssetIds.filter((id) => !own.has(id))];
+  }, [firmLocked, firmAssetIds, sharing, sharedAssetIds]);
+
+  // Per-firm progress for the shared firms (sharing states only).
+  const sharedProgress: FirmProgress[] = useMemo(
+    () =>
+      sharing
+        ? computeFirmProgress({
+            firms: sharing.data.firms,
+            firmBridges: sharing.data.firmBridges,
+            inspections: sharing.data.inspections,
+            assignments: [],
+          })
+        : [],
+    [sharing],
+  );
+
+  // asset_id -> firm name for every bridge in the overview (own +
+  // shared). Only built when sharing is active; StatusBoard renders
+  // its Firm column only when this is passed.
+  const assetFirmName = useMemo(() => {
+    if (!sharing) return null;
+    const m = new Map<string, string>();
+    if (firmAssetIds) {
+      for (const id of firmAssetIds) m.set(id, sharing.ownFirm.name);
+    }
+    const names = new Map(sharing.data.firms.map((f) => [f.id, f.name]));
+    for (const fb of sharing.data.firmBridges) {
+      const n = names.get(fb.firm_id);
+      if (n && !m.has(fb.asset_id)) m.set(fb.asset_id, n);
+    }
+    return m;
+  }, [sharing, firmAssetIds]);
+
+  // asset_id -> firm color for the overview map when sharing is on.
+  const firmColorByAsset = useMemo(() => {
+    if (!sharing) return undefined;
+    const colorMap = buildFirmColorMap([sharing.ownFirm, ...sharing.data.firms]);
+    const out: Record<string, string> = {};
+    const ownColor = colorMap.get(sharing.ownFirm.id);
+    if (ownColor && firmAssetIds) {
+      for (const id of firmAssetIds) out[id] = ownColor;
+    }
+    for (const fb of sharing.data.firmBridges) {
+      const c = colorMap.get(fb.firm_id);
+      if (c && !out[fb.asset_id]) out[fb.asset_id] = c;
+    }
+    return out;
+  }, [sharing, firmAssetIds]);
+
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [bridge, setBridge] = useState<Bridge | null>(null);
   const [inspections, setInspections] = useState<BridgeInspection[] | null>(null);
@@ -95,13 +242,18 @@ export default function Dashboard({
       return;
     }
     // Firm lock: never surface another firm's bridge, even by direct
-    // selection. Wait for the firm's bridge group before deciding.
+    // selection — EXCEPT bridges a sharing state has made visible
+    // (migration 017), which open read-only like the firm's own.
+    // Wait for the firm's bridge group before deciding.
     if (firmLocked) {
       if (firmAssetIds === null) {
         setLoadingDetail(true);
         return;
       }
-      if (!firmAssetIds.includes(selectedAssetId)) {
+      if (
+        !firmAssetIds.includes(selectedAssetId) &&
+        !sharedAssetSet.has(selectedAssetId)
+      ) {
         setBridge(null);
         setInspections([]);
         setDetailBlocked(true);
@@ -169,7 +321,27 @@ export default function Dashboard({
     return () => {
       cancelled = true;
     };
-  }, [selectedAssetId, firmLocked, firmAssetIds]);
+  }, [selectedAssetId, firmLocked, firmAssetIds, sharedAssetSet]);
+
+  // Firm attribution for the selected bridge while sharing is on:
+  // which firm owns it, and (for another firm's bridge) which state's
+  // sharing made it visible.
+  const selectedFirmInfo = useMemo(() => {
+    if (!sharing || !selectedAssetId) return null;
+    if (firmAssetIds?.includes(selectedAssetId)) {
+      return { firm: sharing.ownFirm, shared: false, stateName: '' };
+    }
+    const fb = sharing.data.firmBridges.find(
+      (x) => x.asset_id === selectedAssetId,
+    );
+    if (!fb) return null;
+    const firm = sharing.data.firms.find((f) => f.id === fb.firm_id) ?? null;
+    if (!firm) return null;
+    const st = sharing.states.find(
+      (s) => s.code === stateOfAsset(selectedAssetId),
+    );
+    return { firm, shared: true, stateName: st?.name ?? '' };
+  }, [sharing, selectedAssetId, firmAssetIds]);
 
   return (
     <div className="dash">
@@ -246,7 +418,9 @@ export default function Dashboard({
               showTeam
               height="62vh"
               onBridgeClick={handleSelectBridge}
-              filterAssetIds={firmLocked ? firmAssetIds : null}
+              filterAssetIds={firmLocked ? overviewAssetIds : null}
+              colorBy={sharing ? 'firm' : undefined}
+              firmColorByAsset={firmColorByAsset}
             />
           </div>
         </main>
@@ -257,12 +431,82 @@ export default function Dashboard({
             <StatusBoard
               onSelectBridge={handleSelectBridge}
               stateCode={rosterStateCode}
-              firmAssetIds={firmLocked ? firmAssetIds : null}
+              firmAssetIds={firmLocked ? overviewAssetIds : null}
+              assetFirmName={assetFirmName}
             />
           </div>
         </main>
 
         <aside className="dash-sidebar">
+          {sharing && (
+            <div className="card">
+              <h2 style={{ marginTop: 0 }}>
+                Shared by {sharing.states.map((s) => s.name).join(' & ')}
+              </h2>
+              <p className="muted" style={{ marginTop: 0 }}>
+                {sharing.states.map((s) => s.name).join(' and ')} turned on
+                cross-firm sharing, so you can also see where the other
+                firms are working in{' '}
+                {sharing.states.length === 1 ? 'that state' : 'those states'}{' '}
+                and how far they have progressed. Shared bridges are
+                view-only here.
+              </p>
+              {(() => {
+                const colorMap = buildFirmColorMap([
+                  sharing.ownFirm,
+                  ...sharing.data.firms,
+                ]);
+                const row = (
+                  firm: Firm,
+                  progress: FirmProgress | null,
+                  own: boolean,
+                ) => (
+                  <div
+                    key={firm.id}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      padding: '6px 0',
+                    }}
+                  >
+                    <span
+                      style={{
+                        display: 'inline-block',
+                        width: 10,
+                        height: 10,
+                        borderRadius: '50%',
+                        background: colorMap.get(firm.id) ?? '#64748b',
+                        flexShrink: 0,
+                      }}
+                    />
+                    <span style={{ flex: 1 }}>
+                      {firm.name}
+                      {own && <span className="muted"> (your firm)</span>}
+                    </span>
+                    {progress && (
+                      <span className="muted">
+                        {progress.inspected.toLocaleString()}/
+                        {progress.assigned.toLocaleString()} inspected ·{' '}
+                        {progress.pctComplete}%
+                      </span>
+                    )}
+                  </div>
+                );
+                return (
+                  <>
+                    {row(sharing.ownFirm, null, true)}
+                    {sharedProgress.map((p) => {
+                      const firm = sharing.data.firms.find(
+                        (f) => f.id === p.firm_id,
+                      );
+                      return firm ? row(firm, p, false) : null;
+                    })}
+                  </>
+                );
+              })()}
+            </div>
+          )}
           <div className="card">
             <DataIntake />
           </div>
@@ -294,6 +538,14 @@ export default function Dashboard({
                 ×
               </button>
             </div>
+
+            {selectedFirmInfo && (
+              <p className="muted" style={{ marginTop: 0 }}>
+                Firm: {selectedFirmInfo.firm.name}
+                {selectedFirmInfo.shared &&
+                  ` — shared by ${selectedFirmInfo.stateName} (view only)`}
+              </p>
+            )}
 
             {detailBlocked && (
               <p className="muted">

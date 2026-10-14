@@ -272,6 +272,10 @@ export interface EmgState {
   code: string;
   name: string;
   created_at: string;
+  /** Cross-firm progress sharing (migration 017): when true, every firm
+   *  serving this state can see the other firms' bridge groups and
+   *  progress in their firm ops overview (view-only). */
+  share_firm_progress?: boolean;
 }
 
 /** Admin role hierarchy (migration 015):

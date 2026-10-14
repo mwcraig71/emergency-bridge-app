@@ -10,6 +10,11 @@ interface StatusBoardProps {
   /** Firm scope (bound firm_admin): only these bridges (the firm's
    *  group). Null/undefined = no firm restriction. */
   firmAssetIds?: string[] | null;
+  /** asset_id -> firm name. Passed ONLY when cross-firm sharing
+   *  (migration 017) adds other firms' bridges to the board; renders
+   *  a per-firm attribution column. Null/undefined = no column,
+   *  exactly the pre-sharing board. */
+  assetFirmName?: Map<string, string> | null;
 }
 
 type DisplayStatus =
@@ -87,6 +92,7 @@ export default function StatusBoard({
   onSelectBridge,
   stateCode,
   firmAssetIds,
+  assetFirmName,
 }: StatusBoardProps) {
   const [bridges, setBridges] = useState<Bridge[]>([]);
   const [latestByAsset, setLatestByAsset] = useState<Map<string, LatestRow>>(new Map());
@@ -360,6 +366,7 @@ export default function StatusBoard({
                 </th>
                 <th>County</th>
                 <th>District</th>
+                {assetFirmName && <th>Firm</th>}
                 <th>Status</th>
                 <th>Inspector</th>
                 <th
@@ -388,6 +395,9 @@ export default function StatusBoard({
                     <td>{bridge.asset_id}</td>
                     <td>{bridge.county_name ?? bridge.county ?? '—'}</td>
                     <td>{bridge.district ?? '—'}</td>
+                    {assetFirmName && (
+                      <td>{assetFirmName.get(bridge.asset_id) ?? '—'}</td>
+                    )}
                     <td>
                       <span className={`pill pill-${status}`}>{STATUS_LABEL[status]}</span>
                       {stale && <span className="pill stale">stale</span>}
@@ -401,7 +411,7 @@ export default function StatusBoard({
               })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={8} className="muted">
+                  <td colSpan={assetFirmName ? 9 : 8} className="muted">
                     No bridges match the current filters.
                   </td>
                 </tr>

@@ -300,6 +300,28 @@ h3 { font-size: 16px; margin: 6px 0 8px; font-weight: 500; }
   padding-bottom: 2px;
 }
 .state-select select { min-width: 170px; }
+/* Cross-firm sharing switch (migration 017): checkbox-driven track +
+   knob, squared Strinteg styling — navy track off, burnt orange on. */
+.share-switch {
+  position: relative; flex: 0 0 auto;
+  width: 52px; height: 28px;
+  background: #fff; border: 2px solid var(--brand);
+  border-radius: var(--radius);
+}
+.share-switch input {
+  position: absolute; inset: 0; margin: 0;
+  opacity: 0; cursor: inherit; width: 100%; height: 100%;
+}
+.share-switch .share-switch-knob {
+  position: absolute; top: 3px; left: 3px;
+  width: 18px; height: 18px;
+  background: var(--brand); border-radius: var(--radius);
+  transition: left 0.15s ease, background 0.15s ease;
+  pointer-events: none;
+}
+.share-switch.on { border-color: var(--accent); }
+.share-switch.on .share-switch-knob { left: 27px; background: var(--accent); }
+.share-switch input:disabled { cursor: wait; }
 /* State ops map view: map spans the full content width; the detail and
    firms cards flow underneath it. */
 .state-map-layout {

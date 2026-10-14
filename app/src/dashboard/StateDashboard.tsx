@@ -5,6 +5,7 @@ import UploadNbi from './UploadNbi';
 import {
   loadStateData,
   loadStates,
+  setShareFirmProgress,
   computeFirmProgress,
   computeStateOverview,
   buildStateBridgeRows,
@@ -113,6 +114,59 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
   const [firmFilter, setFirmFilter] = useState<string>('all');
   const [countyFilter, setCountyFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('all');
+
+  // Cross-firm progress sharing (migration 017): the per-state switch
+  // in the Overview's Firm visibility card.
+  const [shareBusy, setShareBusy] = useState<string | null>(null);
+  const [shareError, setShareError] = useState<string | null>(null);
+
+  const handleShareToggle = useCallback(
+    async (state: EmgState, value: boolean) => {
+      setShareError(null);
+      setShareBusy(state.code);
+      // Optimistic: flip locally, revert if the write fails.
+      setStates((prev) =>
+        prev.map((s) =>
+          s.code === state.code ? { ...s, share_firm_progress: value } : s,
+        ),
+      );
+      try {
+        await setShareFirmProgress(state.code, value);
+      } catch (err) {
+        setStates((prev) =>
+          prev.map((s) =>
+            s.code === state.code
+              ? { ...s, share_firm_progress: !value }
+              : s,
+          ),
+        );
+        setShareError(
+          `Could not update sharing for ${state.name}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      } finally {
+        setShareBusy(null);
+      }
+    },
+    [],
+  );
+
+  // States shown in the Firm visibility card: the single scoped state,
+  // or every state in the super admin's All-states view.
+  const visibilityStates: EmgState[] = useMemo(() => {
+    if (!effectiveScope) return states;
+    const found = states.filter((s) => s.code === effectiveScope);
+    if (found.length > 0) return found;
+    return [
+      {
+        code: effectiveScope,
+        name: scopeName ?? effectiveScope,
+        created_at: '',
+        share_firm_progress: false,
+      },
+    ];
+  }, [states, effectiveScope, scopeName]);
 
   // Bridges table
   const [rows, setRows] = useState<StateBridgeRow[]>([]);
@@ -395,6 +449,65 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
               <StatCard label="Open" value={String(overview?.open ?? 0)} />
               <StatCard label="Restricted" value={String(overview?.restricted ?? 0)} />
               <StatCard label="Closed" value={String(overview?.closed ?? 0)} />
+            </div>
+
+            {/* Firm visibility: cross-firm progress sharing (017). */}
+            <div className="card">
+              <h2 style={{ marginTop: 0 }}>Firm visibility</h2>
+              <p className="muted" style={{ marginTop: 0 }}>
+                When sharing is on for a state, every firm working in that
+                state can see the other firms&rsquo; bridge groups and
+                progress in their firm operations overview — view only, so
+                firms can coordinate and pick up each other&rsquo;s bridges
+                in an emergency. When off, firms see only their own work.
+              </p>
+              {visibilityStates.length === 0 ? (
+                <p className="muted">Loading state settings…</p>
+              ) : (
+                visibilityStates.map((s) => {
+                  const on = Boolean(s.share_firm_progress);
+                  return (
+                    <label
+                      key={s.code}
+                      className="share-switch-row"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 12,
+                        padding: '8px 0',
+                        cursor: shareBusy === s.code ? 'wait' : 'pointer',
+                      }}
+                    >
+                      <span
+                        className={`share-switch${on ? ' on' : ''}`}
+                        aria-hidden="true"
+                      >
+                        <input
+                          type="checkbox"
+                          checked={on}
+                          disabled={shareBusy === s.code}
+                          onChange={(e) =>
+                            void handleShareToggle(s, e.target.checked)
+                          }
+                        />
+                        <span className="share-switch-knob" />
+                      </span>
+                      <span>
+                        Allow firms in {s.name} to see each other&rsquo;s
+                        work and progress
+                        <span className="muted">
+                          {' '}
+                          — currently {on ? 'on' : 'off'}
+                          {shareBusy === s.code ? ' (saving…)' : ''}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })
+              )}
+              {shareError && (
+                <p style={{ color: '#f87171', marginBottom: 0 }}>{shareError}</p>
+              )}
             </div>
 
             {scopedProgress && (

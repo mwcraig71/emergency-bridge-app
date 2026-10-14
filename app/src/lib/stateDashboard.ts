@@ -22,8 +22,8 @@ export function stateOfAsset(assetId: string): string {
 
 /** States known before migration 015 / when offline. */
 export const FALLBACK_STATES: EmgState[] = [
-  { code: 'SC', name: 'South Carolina', created_at: '' },
-  { code: 'NC', name: 'North Carolina', created_at: '' },
+  { code: 'SC', name: 'South Carolina', created_at: '', share_firm_progress: false },
+  { code: 'NC', name: 'North Carolina', created_at: '', share_firm_progress: false },
 ];
 
 /** Load the state list from emg_states; falls back to SC/NC. */
@@ -33,17 +33,36 @@ export async function loadStates(): Promise<EmgState[]> {
   try {
     const { data, error } = await sb
       .from('emg_states')
-      .select('code,name,created_at')
+      .select('code,name,created_at,share_firm_progress')
       .order('code');
     if (error || !data || data.length === 0) return FALLBACK_STATES;
     return (data as unknown as EmgState[]).map((s) => ({
       code: String(s.code),
       name: String(s.name ?? s.code),
       created_at: String(s.created_at ?? ''),
+      share_firm_progress: Boolean(s.share_firm_progress),
     }));
   } catch {
     return FALLBACK_STATES;
   }
+}
+
+/**
+ * Turn cross-firm progress sharing on/off for a state (migration 017).
+ * Writes emg_states.share_firm_progress; throws on failure so the UI
+ * can revert its switch.
+ */
+export async function setShareFirmProgress(
+  stateCode: string,
+  value: boolean,
+): Promise<void> {
+  const sb = getSupabase();
+  if (!sb || !isSupabaseConfigured()) throw new Error('Supabase is not configured');
+  const { error } = await sb
+    .from('emg_states')
+    .update({ share_firm_progress: value })
+    .eq('code', stateCode);
+  if (error) throw error;
 }
 
 /** Distinct firm colors for map + table chips. */
@@ -228,6 +247,60 @@ export async function loadStateData(stateCode?: string | null): Promise<StateDat
     inspections: inspections.filter((i) => stateOfAsset(i.asset_id) === stateCode),
     assignments: assignments.filter((a) => stateOfAsset(a.asset_id) === stateCode),
   };
+}
+
+export interface SharedFirmData {
+  /** Other firms (never the requesting firm) serving a sharing state. */
+  firms: Firm[];
+  /** Their bridge groups, restricted to bridges in a sharing state. */
+  firmBridges: { firm_id: string; asset_id: string }[];
+  /** Inspections for those shared bridges only. */
+  inspections: InspectionLite[];
+}
+
+/**
+ * Cross-firm sharing payload for the firm ops overview (migration 017):
+ * the OTHER firms serving any of `sharingStates`, their bridge groups
+ * in those states, and the inspections on those bridges. Feed the
+ * result to computeFirmProgress() for per-firm rollups. Returns empty
+ * data when offline/unconfigured — sharing silently stays off.
+ */
+export async function loadSharedFirmData(
+  excludeFirmId: string,
+  sharingStates: string[],
+): Promise<SharedFirmData> {
+  const empty: SharedFirmData = { firms: [], firmBridges: [], inspections: [] };
+  if (sharingStates.length === 0) return empty;
+  const online = isOnline() && isSupabaseConfigured();
+  if (!online) return empty;
+  const allFirms = await syncFirms().catch(() => [] as Firm[]);
+  const cached = allFirms.length > 0 ? allFirms : await getCachedFirms().catch(() => []);
+  const firms = cached.filter(
+    (f) =>
+      f.id !== excludeFirmId &&
+      sharingStates.some((s) => firmServesState(f, s)),
+  );
+  if (firms.length === 0) return empty;
+  const firmIds = new Set(firms.map((f) => f.id));
+  const sharingSet = new Set(sharingStates);
+  const [firmBridgesAll, inspectionsAll] = await Promise.all([
+    fetchAll<{ firm_id: string; asset_id: string }>(
+      'firm_bridges',
+      'firm_id,asset_id',
+      'asset_id',
+    ).catch(() => []),
+    fetchAll<InspectionLite>(
+      'emg_inspections',
+      'asset_id,firm_id,triage_list,remain_open,inspector_name,inspection_datetime',
+      'inspection_datetime',
+    ).catch(() => []),
+  ]);
+  const firmBridges = firmBridgesAll.filter(
+    (fb) => firmIds.has(fb.firm_id) && sharingSet.has(stateOfAsset(fb.asset_id)),
+  );
+  const sharedAssets = new Set(firmBridges.map((fb) => fb.asset_id));
+  const inspections = inspectionsAll.filter((i) => sharedAssets.has(i.asset_id));
+  return { firms, firmBridges, inspections };
 }
 
 /** Latest inspection per bridge (by inspection_datetime). */
