@@ -157,28 +157,90 @@ export async function syncBridgeCache(
 }
 
 /** Look up one bridge by Asset ID. Tries cache first, then network. */
-export async function findBridge(rawInput: string): Promise<Bridge | null> {
-  const q = normalizeAssetId(rawInput);
-  const cached = await idbGet<Bridge>('bridges', q);
-  if (cached) return cached;
-  // Fallback: case-insensitive scan of cache for struct_no matches
-  const all = await idbGetAll<Bridge>('bridges');
-  const hit = all.find(
-    (b) => b.asset_id === q || b.struct_no.replace(/^0+/, '') === q,
-  );
-  if (hit) return hit;
-  if (!isOnline() || !isSupabaseConfigured()) return null;
+/**
+ * Find bridges by any number a user might type:
+ * - state-prefixed asset id ("SC-1892", "NC 10001")
+ * - the DOT short number (SC Asset ID / NC bridge number: "1892")
+ * - the full FHWA structure number ("000000000001892")
+ * Short and long digit forms need no length detection: in this inventory
+ * the DOT short number IS the structure number without leading zeros, so
+ * both resolve to the same bridges. The same number can exist in more
+ * than one state, so ALL matches are returned and the caller lets the
+ * user pick when there is more than one.
+ */
+export async function findBridges(rawInput: string): Promise<Bridge[]> {
+  const input = rawInput.trim().toUpperCase();
+  if (!input) return [];
+  const matches = new Map<string, Bridge>();
+  const add = (b: Bridge | null | undefined) => {
+    if (b) matches.set(b.asset_id, b);
+  };
+
+  const prefixed = input.match(/^([A-Z]{2})[-\s]?(\d+)$/);
+  const bareDigits = /^\d+$/.test(input) ? String(parseInt(input, 10)) : null;
+
+  // Exact asset id lookups against the device cache.
+  if (prefixed) {
+    add(
+      await idbGet<Bridge>(
+        'bridges',
+        `${prefixed[1]}-${String(parseInt(prefixed[2], 10))}`,
+      ),
+    );
+  }
+  add(await idbGet<Bridge>('bridges', input));
+
+  // Cache scan: a digit query matches the zero-stripped structure number
+  // (the DOT short number); anything else matches struct_no / asset_id
+  // verbatim (covers alphanumeric structure numbers).
+  const all = await idbGetAll<Bridge>('bridges').catch(() => [] as Bridge[]);
+  for (const b of all) {
+    if (bareDigits !== null) {
+      if (b.struct_no.replace(/^0+/, '') === bareDigits) add(b);
+    } else if (b.asset_id === input || b.struct_no.toUpperCase() === input) {
+      add(b);
+    }
+  }
+  if (matches.size > 0) return [...matches.values()];
+
+  // Server fallback (online only).
+  if (!isOnline() || !isSupabaseConfigured()) return [];
   const sb = getSupabase()!;
-  const { data, error } = await sb
-    .from('emg_bridges')
-    .select(BRIDGE_SELECT)
-    .eq('asset_id', q)
-    .limit(1)
-    .maybeSingle();
-  if (error || !data) return null;
-  const b = rowToBridge(data as unknown as Record<string, unknown>);
-  await idbPut('bridges', b);
-  return b;
+  const runQuery = async (
+    column: 'asset_id' | 'struct_no',
+    value: string,
+  ): Promise<void> => {
+    const { data, error } = await sb
+      .from('emg_bridges')
+      .select(BRIDGE_SELECT)
+      .eq(column, value)
+      .limit(10);
+    if (error || !data) return;
+    for (const row of data) {
+      const b = rowToBridge(row as unknown as Record<string, unknown>);
+      await idbPut('bridges', b);
+      add(b);
+    }
+  };
+  if (prefixed) {
+    await runQuery(
+      'asset_id',
+      `${prefixed[1]}-${String(parseInt(prefixed[2], 10))}`,
+    );
+  } else if (bareDigits !== null) {
+    // Try the number as typed, then zero-padded to the 15-digit FHWA form.
+    await runQuery('struct_no', input);
+    if (matches.size === 0) await runQuery('struct_no', input.padStart(15, '0'));
+  } else {
+    await runQuery('asset_id', input);
+    if (matches.size === 0) await runQuery('struct_no', input);
+  }
+  return [...matches.values()];
+}
+
+export async function findBridge(rawInput: string): Promise<Bridge | null> {
+  const results = await findBridges(rawInput);
+  return results[0] ?? null;
 }
 
 /** Uninspected bridges nearest to a GPS fix (uses cached inventory). */

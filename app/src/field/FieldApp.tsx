@@ -420,7 +420,9 @@ const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
   const requireName = (): boolean => {
     if (!inspectorName.trim()) {
       setNameHint(true);
-      setTab('inspect');
+      // Land the user on the name field (Sync tab → Settings card) instead
+      // of silently swallowing the tap they just made.
+      setTab('sync');
       return false;
     }
     return true;
@@ -716,8 +718,22 @@ const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
                 color: '#5C4300',
               }}
             >
-              Showing all assignments — set your name in Settings to see only
-              yours.
+              <div style={{ marginBottom: 8 }}>
+                Showing all assignments — set your name to see only yours.
+              </div>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => setTab('sync')}
+                style={{
+                  minHeight: 44,
+                  fontWeight: 700,
+                  background: '#001A52',
+                  color: '#fff',
+                }}
+              >
+                Set your name
+              </button>
             </div>
           )}
           {myAssignments.length === 0 && (

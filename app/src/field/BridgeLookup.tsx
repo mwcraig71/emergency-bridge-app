@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import type { Bridge, InspectionDraft } from '../types';
 import {
-  findBridge,
+  findBridges,
   nearestUninspected,
   syncBridgeCache,
   type SyncBridgeCacheOptions,
@@ -32,6 +32,7 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
   const [dlAssignedOnly, setDlAssignedOnly] = useState(false);
   const [query, setQuery] = useState('');
   const [notFound, setNotFound] = useState<string | null>(null);
+  const [results, setResults] = useState<Bridge[] | null>(null);
   const [searching, setSearching] = useState(false);
   const [nearbyError, setNearbyError] = useState<string | null>(null);
   const [nearbyLoading, setNearbyLoading] = useState(false);
@@ -119,10 +120,15 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
     if (!input) return;
     setSearching(true);
     setNotFound(null);
+    setResults(null);
     try {
-      const bridge = await findBridge(input);
-      if (bridge) {
-        onSelect(bridge);
+      const found = await findBridges(input);
+      if (found.length === 1) {
+        onSelect(found[0]);
+      } else if (found.length > 1) {
+        // The same number can exist in more than one state — let the
+        // user pick rather than silently opening the wrong bridge.
+        setResults(found);
       } else {
         setNotFound(`No bridge found for '${input}'.`);
       }
@@ -257,7 +263,7 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
           htmlFor="bridge-lookup-input"
           style={{ display: 'block', fontWeight: 600, marginBottom: 6 }}
         >
-          SCDOT Asset ID
+          Bridge number
         </label>
         <input
           id="bridge-lookup-input"
@@ -266,11 +272,12 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
           inputMode="text"
           autoComplete="off"
           autoCapitalize="characters"
-          placeholder="e.g. 0123456"
+          placeholder="e.g. 1892 or 000000000001892"
           value={query}
           onChange={(e) => {
             setQuery(e.target.value);
             setNotFound(null);
+            setResults(null);
           }}
           onKeyDown={(e) => {
             if (e.key === 'Enter') {
@@ -287,12 +294,63 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
         >
           {searching ? 'Searching…' : 'Search'}
         </button>
+        <div className="muted" style={{ marginTop: 8, fontSize: 13 }}>
+          Search by the short DOT number (SC Asset ID or NC bridge number)
+          or the full FHWA structure number — either works.
+        </div>
         {notFound && (
           <div
             role="alert"
             style={{ marginTop: 12, color: '#b00020', fontWeight: 600 }}
           >
             {notFound}
+          </div>
+        )}
+        {results && results.length > 1 && (
+          <div style={{ marginTop: 12 }}>
+            <div style={{ fontWeight: 600, marginBottom: 8 }}>
+              More than one bridge has that number — tap yours:
+            </div>
+            <ul style={{ listStyle: 'none', padding: 0, margin: 0 }}>
+              {results.map((b) => {
+                const county = b.county_name ?? b.county ?? '';
+                const facility =
+                  (b as unknown as { facility?: string }).facility ?? '';
+                return (
+                  <li key={b.asset_id} style={{ marginBottom: 8 }}>
+                    <button
+                      className="btn"
+                      onClick={() => {
+                        setResults(null);
+                        onSelect(b);
+                      }}
+                      style={{
+                        minHeight: 64,
+                        width: '100%',
+                        textAlign: 'left',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'flex-start',
+                        gap: 2,
+                        padding: 12,
+                      }}
+                    >
+                      <span style={{ fontWeight: 700, fontSize: 16 }}>
+                        {b.asset_id} · FHWA {b.struct_no}
+                      </span>
+                      <span
+                        className="muted"
+                        style={{ fontSize: 13, color: '#000' }}
+                      >
+                        {county}
+                        {county && facility ? ' · ' : ''}
+                        {facility}
+                      </span>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
           </div>
         )}
         <div className="muted" style={{ marginTop: 12, fontSize: 13 }}>
@@ -356,7 +414,10 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
                     <span style={{ fontWeight: 700, fontSize: 16 }}>
                       {formatDistance(r.distance)} · {assetId}
                     </span>
-                    <span className="muted" style={{ fontSize: 13 }}>
+                    <span
+                      className="muted"
+                      style={{ fontSize: 13, color: '#000' }}
+                    >
                       {county}
                       {county && facility ? ' · ' : ''}
                       {facility}
