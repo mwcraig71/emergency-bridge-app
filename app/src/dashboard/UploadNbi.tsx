@@ -144,8 +144,19 @@ function PreviewMap({ bbox, points }: { bbox: [number, number, number, number] |
   return <div ref={ref} style={{ height: 260, borderRadius: 8, overflow: 'hidden' }} />;
 }
 
-export default function UploadNbi(): React.JSX.Element {
-  const [state, setState] = useState('NC');
+export default function UploadNbi({
+  lockedState,
+}: {
+  /** When set (a state-scoped State ops view), the upload is for this
+   *  state only and the state picker is not shown. */
+  lockedState?: string | null;
+} = {}): React.JSX.Element {
+  const [state, setState] = useState(lockedState ?? 'NC');
+
+  // Keep the upload state in sync with the surrounding state scope.
+  useEffect(() => {
+    if (lockedState) setState(lockedState.toUpperCase());
+  }, [lockedState]);
   const [importedBy, setImportedBy] = useState('');
   const [step, setStep] = useState<Step>('select');
   const [preview, setPreview] = useState<Preview | null>(null);
@@ -285,11 +296,15 @@ export default function UploadNbi(): React.JSX.Element {
           <div style={{ display: 'flex', gap: 12, marginBottom: 12, flexWrap: 'wrap' }}>
             <label>
               State{' '}
-              <select value={state} onChange={(e) => setState(e.target.value.toUpperCase())}>
-                {US_STATES.map((s) => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
+              {lockedState ? (
+                <strong>{state}</strong>
+              ) : (
+                <select value={state} onChange={(e) => setState(e.target.value.toUpperCase())}>
+                  {US_STATES.map((s) => (
+                    <option key={s} value={s}>{s}</option>
+                  ))}
+                </select>
+              )}
             </label>
             <label>
               Imported by{' '}

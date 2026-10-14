@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import TeamMap from '../components/TeamMap';
 import FirmBulkAssign from './FirmBulkAssign';
+import UploadNbi from './UploadNbi';
 import {
   loadStateData,
   loadStates,
@@ -17,7 +18,7 @@ import {
 } from '../lib/stateDashboard';
 import type { EmgState, Firm } from '../types';
 
-type View = 'overview' | 'assign' | 'map';
+type View = 'overview' | 'assign' | 'map' | 'inventory';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All statuses' },
@@ -321,6 +322,13 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
               onClick={() => setView('map')}
             >
               Map
+            </button>
+            <button
+              type="button"
+              className={view === 'inventory' ? 'active' : ''}
+              onClick={() => setView('inventory')}
+            >
+              Upload NBI
             </button>
           </nav>
           {/* State selector lives IN the tabs row, right-aligned — a
@@ -644,6 +652,14 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
               onFirmsChanged={() => void loadAll()}
               stateCode={effectiveScope}
             />
+          </main>
+        </div>
+      )}
+
+      {view === 'inventory' && (
+        <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <main className="dash-main">
+            <UploadNbi lockedState={effectiveScope} />
           </main>
         </div>
       )}
