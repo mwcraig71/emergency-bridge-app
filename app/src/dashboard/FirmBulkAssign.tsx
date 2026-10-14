@@ -28,7 +28,11 @@ interface Props {
  * Shows each bridge's current firm before assigning.
  */
 export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Props) {
-  const [state, setState] = useState<BridgeState>('SC');
+  // State comes from the single State ops selector (the dashboard's
+  // scope) — this panel intentionally has NO state dropdown of its own.
+  // With no scope (super admin, All states), bridge resolution defaults
+  // to SC, as before; pasted IDs carry their own state prefix anyway.
+  const state: BridgeState = stateCode === 'NC' ? 'NC' : 'SC';
   const [pasteText, setPasteText] = useState('');
   const [firmId, setFirmId] = useState('');
   const [newFirmName, setNewFirmName] = useState('');
@@ -40,6 +44,17 @@ export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Pro
   const [message, setMessage] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
+  // In a state view, only that state's firms are shown, with plain
+  // names — no other state's name appears anywhere. The "(NC, SC)"
+  // suffix is only useful in the super admin's All-states view.
+  const visibleFirms = stateCode
+    ? firms.filter((f) => f.states.includes(stateCode))
+    : firms;
+  const firmLabel = (f: Firm) =>
+    !stateCode && f.states.length > 0
+      ? `${f.name} (${f.states.join(', ')})`
+      : f.name;
+
   const configured = isOnline() && isSupabaseConfigured();
   const firmName = useCallback(
     (id: string | undefined | null) =>
@@ -48,13 +63,8 @@ export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Pro
   );
 
   useEffect(() => {
-    if (!firmId && firms.length > 0) setFirmId(firms[0].id);
-  }, [firms, firmId]);
-
-  // In a state-scoped view, bridge resolution defaults to that state.
-  useEffect(() => {
-    if (stateCode === 'SC' || stateCode === 'NC') setState(stateCode);
-  }, [stateCode]);
+    if (!firmId && visibleFirms.length > 0) setFirmId(visibleFirms[0].id);
+  }, [visibleFirms, firmId]);
 
   const handleResolve = async () => {
     const ids = parseIdList(pasteText);
@@ -177,16 +187,15 @@ export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Pro
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-      <div className="card">
+      <div className="card" style={{ order: 2 }}>
         <h2 style={{ marginTop: 0 }}>Firms</h2>
-        {firms.length === 0 ? (
+        {visibleFirms.length === 0 ? (
           <p className="muted">No firms yet — create the first one below.</p>
         ) : (
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 12 }}>
-            {firms.map((f) => (
+            {visibleFirms.map((f) => (
               <span key={f.id} className="pill" style={{ fontSize: 13 }}>
-                {f.name}
-                {f.states.length > 0 ? ` (${f.states.join(', ')})` : ''}
+                {firmLabel(f)}
               </span>
             ))}
           </div>
@@ -213,12 +222,26 @@ export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Pro
         </div>
       </div>
 
-      <div className="card">
+      <div className="card" style={{ order: 1 }}>
         <h2 style={{ marginTop: 0 }}>Assign bridges to a firm</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          Paste bridge IDs or upload a CSV, resolve them, then assign the group
-          to a firm. Bridges already assigned show their current firm.
+          Type bridge numbers in the box, paste a list, or upload a CSV —
+          then resolve them and assign the group to a firm. Bridges already
+          assigned show their current firm.
         </p>
+        <label
+          style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}
+        >
+          <span className="muted">Bridge numbers</span>
+          <textarea
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            placeholder={'One bridge ID per line, e.g.\n1892\nSC-1892\n000000000001892'}
+            rows={8}
+            style={{ width: '100%', fontFamily: 'monospace', fontSize: 13 }}
+            disabled={resolving || saving}
+          />
+        </label>
         {message && (
           <p className="muted" style={{ color: '#e2e8f0' }}>
             {message}
@@ -234,28 +257,16 @@ export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Pro
           }}
         >
           <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-            <span className="muted">State</span>
-            <select
-              value={state}
-              onChange={(e) => setState(e.target.value as BridgeState)}
-              disabled={resolving || saving}
-            >
-              <option value="SC">SC</option>
-              <option value="NC">NC</option>
-            </select>
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             <span className="muted">Firm</span>
             <select
               value={firmId}
               onChange={(e) => setFirmId(e.target.value)}
-              disabled={resolving || saving || firms.length === 0}
+              disabled={resolving || saving || visibleFirms.length === 0}
               style={{ minWidth: 160 }}
             >
-              {firms.map((f) => (
+              {visibleFirms.map((f) => (
                 <option key={f.id} value={f.id}>
-                  {f.name}
-                  {f.states.length > 0 ? ` (${f.states.join(', ')})` : ''}
+                  {firmLabel(f)}
                 </option>
               ))}
             </select>
@@ -288,18 +299,10 @@ export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Pro
             {resolving ? 'Resolving…' : 'Resolve bridges'}
           </button>
         </div>
-        <textarea
-          value={pasteText}
-          onChange={(e) => setPasteText(e.target.value)}
-          placeholder={'One bridge ID per line, e.g.\n1892\nSC-1892\n000000000001892'}
-          rows={8}
-          style={{ width: '100%', fontFamily: 'monospace', fontSize: 13 }}
-          disabled={resolving || saving}
-        />
       </div>
 
       {resolved && (
-        <div className="card">
+        <div className="card" style={{ order: 3 }}>
           <h2 style={{ marginTop: 0 }}>
             Resolved bridges{' '}
             <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>
