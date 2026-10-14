@@ -339,7 +339,7 @@ export default function FirmBulkAssign({ firms, onFirmsChanged, stateCode }: Pro
                             <code>{b.asset_id}</code>
                           </td>
                           <td>{b.facility ?? '—'}</td>
-                          <td>{b.county_name ?? '—'}</td>
+                          <td>{b.county_name ?? b.county ?? '—'}</td>
                           <td>{cur ? firmName(cur) : <span className="muted">unassigned</span>}</td>
                         </tr>
                       );

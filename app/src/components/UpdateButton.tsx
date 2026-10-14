@@ -4,6 +4,16 @@ import { CapacitorUpdater } from '@capgo/capacitor-updater';
 
 type Phase = 'idle' | 'checking' | 'downloading' | 'restarting';
 
+/** Best-effort human-readable detail from a plugin error value. */
+function errorDetail(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (err && typeof err === 'object' && 'message' in err) {
+    return String((err as { message: unknown }).message);
+  }
+  if (typeof err === 'string') return err;
+  return err ? String(err) : '';
+}
+
 /**
  * Manual over-the-air update check for the top nav. The plugin's
  * autoUpdate only applies bundles across background/launch cycles, so
@@ -38,6 +48,16 @@ export default function UpdateButton() {
       setPhase('checking');
       const latest = await CapacitorUpdater.getLatest();
       const { bundle } = await CapacitorUpdater.current();
+      if (latest.error && latest.error !== 'no_new_version_available') {
+        // The check itself failed (unreachable endpoint, bad response…).
+        // Surface the plugin's own error so the failure is diagnosable
+        // instead of a generic connection message.
+        showMessage(
+          `Couldn't check for updates (${latest.error}). ` +
+            'Check your connection and try again.',
+        );
+        return;
+      }
       if (
         latest.error === 'no_new_version_available' ||
         latest.version === bundle.version ||
@@ -58,8 +78,12 @@ export default function UpdateButton() {
       // set() applies the bundle and reloads immediately — it is a
       // terminal call, so nothing after it runs.
       await CapacitorUpdater.set({ id: downloaded.id });
-    } catch {
-      showMessage("Couldn't check for updates. Check your connection and try again.");
+    } catch (err) {
+      const detail = errorDetail(err);
+      showMessage(
+        `Couldn't check for updates${detail ? ` (${detail})` : ''}. ` +
+          'Check your connection and try again.',
+      );
     } finally {
       setPhase('idle');
     }

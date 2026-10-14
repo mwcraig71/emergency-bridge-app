@@ -5,7 +5,9 @@ import {
   firmServesState,
   getCachedFirms,
   getFirmBridges,
+  getFirmInspectors,
   syncFirms,
+  syncInspectors,
 } from '../lib/firm';
 import {
   parseIdList,
@@ -21,9 +23,17 @@ interface DistrictRow {
   dist_label: string;
 }
 
+/** One district dropdown entry: `value` is the value stored in
+ *  emg_bridges.district; `label` is what the user sees. */
+interface DistrictOption {
+  value: string;
+  label: string;
+}
+
 interface BridgeRow {
   asset_id: string;
   district: string | null;
+  county: string | null;
   county_name: string | null;
   facility: string | null;
   lat: number | null;
@@ -114,7 +124,7 @@ export default function AssignmentsPanel({
   adminProfile,
 }: AssignmentsPanelProps) {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
-  const [districts, setDistricts] = useState<DistrictRow[]>([]);
+  const [districtOptions, setDistrictOptions] = useState<DistrictOption[]>([]);
   const [counties, setCounties] = useState<string[]>([]);
   const [bridgeState, setBridgeState] = useState<BridgeState>(
     adminProfile?.role === 'state_admin' && adminProfile.stateCode === 'NC'
@@ -136,13 +146,15 @@ export default function AssignmentsPanel({
   const [preview, setPreview] = useState<BridgeRow[] | null>(null);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [locationSort, setLocationSort] = useState(false);
-  const [selectInspector, setSelectInspector] = useState('');
 
-  const [bulkInspector, setBulkInspector] = useState('');
+  // ONE inspector for every assign action in the merged card.
+  const [inspector, setInspector] = useState('');
   const [pasteIds, setPasteIds] = useState('');
-  const [pasteInspector, setPasteInspector] = useState('');
+  // Assignment-status filters: dropdowns, not free text.
   const [filterInspector, setFilterInspector] = useState('');
-  const [tab, setTab] = useState<'district' | 'bulk'>('district');
+  const [filterBridge, setFilterBridge] = useState('');
+  const [rosterNames, setRosterNames] = useState<string[]>([]);
+  const [tab, setTab] = useState<'assign' | 'bulk'>('assign');
   const [loading, setLoading] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
@@ -243,29 +255,67 @@ export default function AssignmentsPanel({
     void reload();
   }, [reload]);
 
-  // Districts derive ONLY from districts of the selected state
-  // (emg_districts.state, migration 003) — NC never lists SC districts.
+  // District options for the selected state = emg_districts rows for
+  // that state UNION the distinct district values actually present on
+  // that state's bridges. emg_districts only has SC rows ('1'..'7') and
+  // its id is a PK shared across states, so NC's 14 NCDOT divisions can
+  // only come from bridge data. Labels: the emg_districts label when one
+  // exists, else "Division N" (NC) / "District N" (SC).
   useEffect(() => {
     if (!configured) {
-      setDistricts([]);
+      setDistrictOptions([]);
       return;
     }
     let cancelled = false;
     (async () => {
       try {
         const sb = getSupabase()!;
-        const { data, error } = await sb
+        const labels = new Map<string, string>();
+        const { data: distData, error: distError } = await sb
           .from('emg_districts')
           .select('id,dist_label')
           .eq('state', bridgeState)
           .order('id');
-        if (error) throw error;
+        if (!distError) {
+          for (const d of (distData ?? []) as unknown as DistrictRow[]) {
+            labels.set(String(d.id), d.dist_label);
+          }
+        }
+        const values = new Set<string>(labels.keys());
+        const PAGE = 1000;
+        for (let from = 0; from < 30000; from += PAGE) {
+          const { data, error } = await sb
+            .from('emg_bridges')
+            .select('district')
+            .like('asset_id', `${bridgeState}-%`)
+            .range(from, from + PAGE - 1);
+          if (error) throw error;
+          const rows = (data ?? []) as { district: string | null }[];
+          for (const r of rows) {
+            if (r.district) values.add(String(r.district));
+          }
+          if (rows.length < PAGE) break;
+        }
         if (!cancelled) {
-          setDistricts((data ?? []) as unknown as DistrictRow[]);
-          setDistrict('');
+          const opts: DistrictOption[] = [...values]
+            .sort(
+              (a, b) =>
+                (parseInt(a, 10) || 0) - (parseInt(b, 10) || 0) ||
+                a.localeCompare(b),
+            )
+            .map((v) => ({
+              value: v,
+              label:
+                labels.get(v) ??
+                (bridgeState === 'NC' ? `Division ${v}` : `District ${v}`),
+            }));
+          setDistrictOptions(opts);
+          setDistrict((prev) =>
+            opts.some((o) => o.value === prev) ? prev : '',
+          );
         }
       } catch {
-        if (!cancelled) setDistricts([]);
+        if (!cancelled) setDistrictOptions([]);
       }
     })();
     return () => {
@@ -314,12 +364,40 @@ export default function AssignmentsPanel({
     };
   }, [bridgeState, district, configured]);
 
+  // Roster names for the selected firm — fills the assignment-status
+  // Inspector filter dropdown (same source as InspectorSelect/TeamRoster).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      if (!selectedFirmId) {
+        if (!cancelled) setRosterNames([]);
+        return;
+      }
+      if (configured) {
+        try {
+          await syncInspectors(selectedFirmId);
+        } catch {
+          // fall through to the local cache
+        }
+      }
+      try {
+        const list = await getFirmInspectors(selectedFirmId);
+        if (!cancelled) setRosterNames(list.map((i) => i.name));
+      } catch {
+        if (!cancelled) setRosterNames([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedFirmId, configured]);
+
   /** Bridges matching state/district/county with no active assignment. */
   const fetchUnassigned = useCallback(async (): Promise<BridgeRow[]> => {
     const sb = getSupabase()!;
     let q = sb
       .from('emg_bridges')
-      .select('asset_id,district,county_name,facility,lat,lon')
+      .select('asset_id,district,county,county_name,facility,lat,lon')
       .like('asset_id', `${bridgeState}-%`);
     if (district) q = q.eq('district', district);
     if (county) q = q.eq('county_name', county);
@@ -377,9 +455,9 @@ export default function AssignmentsPanel({
   );
 
   const handleBulkAssign = async () => {
-    const name = bulkInspector.trim();
+    const name = inspector.trim();
     if (!name) {
-      setMessage('Choose an inspector for the bulk assignment.');
+      setMessage('Choose an inspector for the assignment.');
       return;
     }
     if (!district && !county) {
@@ -414,7 +492,7 @@ export default function AssignmentsPanel({
 
   /** Assign every CHECKED bridge in the results list to one inspector. */
   const handleAssignSelected = async () => {
-    const name = selectInspector.trim();
+    const name = inspector.trim();
     if (selectedIds.size === 0) {
       setMessage('Check at least one bridge in the results list first.');
       return;
@@ -445,7 +523,7 @@ export default function AssignmentsPanel({
   /** Paste-list assign: asset IDs separated by commas, spaces, or
    *  newlines are resolved and all assigned to one inspector at once. */
   const handlePasteAssign = async () => {
-    const name = pasteInspector.trim();
+    const name = inspector.trim();
     const ids = parseIdList(pasteIds);
     if (ids.length === 0) {
       setMessage(
@@ -508,14 +586,26 @@ export default function AssignmentsPanel({
     return sortByProximity(preview, firstSelected?.asset_id ?? null);
   }, [preview, locationSort, selectedIds]);
 
+  // Assignment-status filters: Inspector dropdown (firm roster plus any
+  // assignee already on the list) and Bridge dropdown (bridges in the
+  // current assignments list). '' = all.
+  const inspectorFilterOptions = useMemo(() => {
+    const names = new Set<string>(rosterNames);
+    for (const a of assignments) {
+      if (a.assigned_to) names.add(a.assigned_to);
+    }
+    return [...names].sort((a, b) => a.localeCompare(b));
+  }, [rosterNames, assignments]);
+
+  const bridgeFilterOptions = useMemo(
+    () => [...new Set(assignments.map((a) => a.asset_id))].sort(),
+    [assignments],
+  );
+
   const filtered = assignments.filter((a) => {
-    const f = filterInspector.trim().toLowerCase();
-    if (!f) return true;
-    return (
-      a.assigned_to.toLowerCase().includes(f) ||
-      (a.completed_by ?? '').toLowerCase().includes(f) ||
-      a.asset_id.toLowerCase().includes(f)
-    );
+    if (filterInspector && a.assigned_to !== filterInspector) return false;
+    if (filterBridge && a.asset_id !== filterBridge) return false;
+    return true;
   });
 
   const openCount = assignments.filter((a) => a.status !== 'complete').length;
@@ -586,10 +676,10 @@ export default function AssignmentsPanel({
         <div style={{ display: 'flex', gap: 8, marginTop: 8 }}>
           <button
             type="button"
-            className={tab === 'district' ? 'btn btn-primary' : 'btn'}
-            onClick={() => setTab('district')}
+            className={tab === 'assign' ? 'btn btn-primary' : 'btn'}
+            onClick={() => setTab('assign')}
           >
-            District / County
+            Assign Bridges
           </button>
           <button
             type="button"
@@ -601,10 +691,9 @@ export default function AssignmentsPanel({
         </div>
       </div>
 
-      {tab === 'district' && (
-        <>
-          <div className="card">
-            <h2 style={{ marginTop: 0 }}>Find bridges</h2>
+      {tab === 'assign' && (
+        <div className="card">
+          <h2 style={{ marginTop: 0 }}>Assign Bridges</h2>
             <div
               style={{
                 display: 'flex',
@@ -640,9 +729,9 @@ export default function AssignmentsPanel({
                   disabled={loading}
                 >
                   <option value="">All</option>
-                  {districts.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.dist_label}
+                  {districtOptions.map((d) => (
+                    <option key={d.value} value={d.value}>
+                      {d.label}
                     </option>
                   ))}
                 </select>
@@ -671,22 +760,59 @@ export default function AssignmentsPanel({
                 {loading ? 'Working…' : 'Show bridges'}
               </button>
             </div>
-            <p className="muted" style={{ marginBottom: 0 }}>
-              District and county lists come only from {bridgeState} bridges.
-              Results show unassigned bridges
+            <p className="muted">
+              {bridgeState === 'NC' ? 'Division' : 'District'} and county
+              lists come only from {bridgeState} bridges. Results show
+              unassigned bridges
               {selectedFirmName ? ` in ${selectedFirmName}'s group` : ''}.
             </p>
-          </div>
+            <div
+              style={{
+                display: 'flex',
+                gap: 8,
+                flexWrap: 'wrap',
+                alignItems: 'flex-end',
+                borderTop: '1px solid #334155',
+                paddingTop: 12,
+              }}
+            >
+              <label
+                style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+              >
+                <span className="muted">Assign to (inspector)</span>
+                <InspectorSelect
+                  firmId={selectedFirmId || null}
+                  value={inspector}
+                  onChange={setInspector}
+                  disabled={loading}
+                />
+              </label>
+              <button
+                type="button"
+                className="btn"
+                onClick={() => void handleBulkAssign()}
+                disabled={loading || (!district && !county)}
+              >
+                {loading ? 'Working…' : 'Assign all unassigned in selection'}
+              </button>
+            </div>
+            <p className="muted" style={{ marginBottom: 0 }}>
+              “Assign all unassigned” gives every bridge in the current
+              state/{bridgeState === 'NC' ? 'division' : 'district'}/county
+              selection to the inspector above — bridges already assigned or
+              in progress are skipped. Or show the bridges, check the ones
+              you want, and assign just those.
+            </p>
 
           {displayedPreview && (
-            <div className="card">
-              <h2 style={{ marginTop: 0 }}>
+            <div style={{ marginTop: 16 }}>
+              <h3 style={{ marginTop: 0 }}>
                 Bridge results{' '}
                 <span className="muted" style={{ fontWeight: 400, fontSize: 13 }}>
                   {displayedPreview.length} unassigned · {selectedIds.size}{' '}
                   checked
                 </span>
-              </h2>
+              </h3>
               <div
                 style={{
                   display: 'flex',
@@ -712,17 +838,6 @@ export default function AssignmentsPanel({
                     style={{ width: 18, height: 18, accentColor: '#CF3910' }}
                   />
                   <span>Sort by location (nearest-neighbor)</span>
-                </label>
-                <label
-                  style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
-                >
-                  <span className="muted">Inspector</span>
-                  <InspectorSelect
-                    firmId={selectedFirmId || null}
-                    value={selectInspector}
-                    onChange={setSelectInspector}
-                    disabled={loading}
-                  />
                 </label>
                 <button
                   type="button"
@@ -788,7 +903,7 @@ export default function AssignmentsPanel({
                           <code>{b.asset_id}</code>
                         </td>
                         <td>{b.facility ?? '—'}</td>
-                        <td>{b.county_name ?? '—'}</td>
+                        <td>{b.county_name ?? b.county ?? '—'}</td>
                         <td>{b.district ?? '—'}</td>
                       </tr>
                     ))}
@@ -804,47 +919,18 @@ export default function AssignmentsPanel({
             </div>
           )}
 
-          <div className="card">
-            <h2 style={{ marginTop: 0 }}>Bulk assign by district / county</h2>
-            <div
-              style={{
-                display: 'flex',
-                gap: 8,
-                flexWrap: 'wrap',
-                alignItems: 'flex-end',
-              }}
-            >
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span className="muted">Inspector</span>
-                <InspectorSelect
-                  firmId={selectedFirmId || null}
-                  value={bulkInspector}
-                  onChange={setBulkInspector}
-                  disabled={loading}
-                />
-              </label>
-              <button
-                type="button"
-                className="btn btn-primary"
-                onClick={() => void handleBulkAssign()}
-                disabled={loading}
-              >
-                {loading ? 'Working…' : 'Assign all unassigned'}
-              </button>
-            </div>
-            <p className="muted" style={{ marginBottom: 0 }}>
-              Assigns every bridge in the current state/district/county
-              selection that has no active assignment. Bridges already
-              assigned or in progress are skipped.
-            </p>
-          </div>
-
-          <div className="card">
-            <h2 style={{ marginTop: 0 }}>Assign by bridge list</h2>
+          <div
+            style={{
+              borderTop: '1px solid #334155',
+              marginTop: 16,
+              paddingTop: 12,
+            }}
+          >
+            <h3 style={{ marginTop: 0 }}>Assign by bridge list</h3>
             <p className="muted" style={{ marginTop: 0 }}>
               Paste bridge numbers — separated by commas, spaces, or
               newlines (Import CSV lists work too) — and assign them all to
-              one inspector at once.
+              the inspector chosen above.
             </p>
             <textarea
               value={pasteIds}
@@ -863,15 +949,6 @@ export default function AssignmentsPanel({
                 marginTop: 8,
               }}
             >
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span className="muted">Inspector</span>
-                <InspectorSelect
-                  firmId={selectedFirmId || null}
-                  value={pasteInspector}
-                  onChange={setPasteInspector}
-                  disabled={loading}
-                />
-              </label>
               <button
                 type="button"
                 className="btn btn-primary"
@@ -882,21 +959,52 @@ export default function AssignmentsPanel({
               </button>
             </div>
           </div>
-        </>
+        </div>
       )}
 
       {tab === 'bulk' && <BulkBridgeInput firmId={selectedFirmId || null} />}
 
       <div className="card">
         <h2 style={{ marginTop: 0 }}>Assignment status</h2>
-        <div style={{ marginBottom: 8 }}>
-          <input
-            type="text"
-            value={filterInspector}
-            onChange={(e) => setFilterInspector(e.target.value)}
-            placeholder="Filter by inspector or bridge…"
-            style={{ width: '100%', maxWidth: 320 }}
-          />
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            flexWrap: 'wrap',
+            alignItems: 'flex-end',
+            marginBottom: 8,
+          }}
+        >
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span className="muted">Inspector</span>
+            <select
+              value={filterInspector}
+              onChange={(e) => setFilterInspector(e.target.value)}
+              style={{ minWidth: 180 }}
+            >
+              <option value="">All inspectors</option>
+              {inspectorFilterOptions.map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            <span className="muted">Bridge</span>
+            <select
+              value={filterBridge}
+              onChange={(e) => setFilterBridge(e.target.value)}
+              style={{ minWidth: 180 }}
+            >
+              <option value="">All bridges</option>
+              {bridgeFilterOptions.map((id) => (
+                <option key={id} value={id}>
+                  {id}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
         {filtered.length === 0 && (
           <p className="muted">No assignments found.</p>

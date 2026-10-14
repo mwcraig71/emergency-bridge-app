@@ -367,7 +367,7 @@ export default function BulkBridgeInput({ firmId }: BulkBridgeInputProps) {
                           <code>{b.asset_id}</code>
                         </td>
                         <td>{b.facility ?? '—'}</td>
-                        <td>{b.county_name ?? '—'}</td>
+                        <td>{b.county_name ?? b.county ?? '—'}</td>
                         <td>
                           <InspectorSelect
                             firmId={firmId}

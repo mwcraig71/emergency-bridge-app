@@ -386,7 +386,7 @@ export default function StatusBoard({
                     className="row-clickable"
                   >
                     <td>{bridge.asset_id}</td>
-                    <td>{bridge.county_name ?? '—'}</td>
+                    <td>{bridge.county_name ?? bridge.county ?? '—'}</td>
                     <td>{bridge.district ?? '—'}</td>
                     <td>
                       <span className={`pill pill-${status}`}>{STATUS_LABEL[status]}</span>

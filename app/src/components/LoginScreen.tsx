@@ -152,10 +152,12 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
   return (
     <div className="login-screen">
       <header className="login-header">
-        <span className="brandmark" aria-label="Strinteg">
-          <span className="str">STR</span>INTEG
-        </span>
-        <h1>Emergency Bridge Inspection</h1>
+        <div className="login-brandrow">
+          <span className="brandmark" aria-label="Strinteg">
+            <span className="str">STR</span>INTEG
+          </span>
+          <h1>Emergency Bridge Inspection</h1>
+        </div>
         <p>Sign in to start your shift.</p>
       </header>
 

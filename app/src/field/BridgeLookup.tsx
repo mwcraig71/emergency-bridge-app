@@ -1,6 +1,12 @@
 import React, { useEffect, useState } from 'react';
 import type { Bridge, InspectionDraft } from '../types';
-import { findBridge, nearestUninspected, syncBridgeCache } from '../lib/bridges';
+import {
+  findBridge,
+  nearestUninspected,
+  syncBridgeCache,
+  type SyncBridgeCacheOptions,
+} from '../lib/bridges';
+import { getAllAssignments, syncAssignments } from '../lib/assignments';
 import { idbGetAll, idbCount, idbGet } from '../lib/idb';
 import { getGpsFix } from '../lib/location';
 import { formatDistance } from '../lib/geo';
@@ -19,6 +25,11 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
   const [syncedAt, setSyncedAt] = useState<string | null>(null);
   const [syncing, setSyncing] = useState(false);
   const [syncProgress, setSyncProgress] = useState<string>('');
+  // Inventory download chooser: the user picks what lands on the device
+  // BEFORE anything downloads (states, and/or only their assignments).
+  const [dlNc, setDlNc] = useState(false);
+  const [dlSc, setDlSc] = useState(false);
+  const [dlAssignedOnly, setDlAssignedOnly] = useState(false);
   const [query, setQuery] = useState('');
   const [notFound, setNotFound] = useState<string | null>(null);
   const [searching, setSearching] = useState(false);
@@ -48,18 +59,56 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
   }, []);
 
   const handleSync = async () => {
+    const states: string[] = [];
+    if (dlNc) states.push('NC');
+    if (dlSc) states.push('SC');
+    if (states.length === 0 && !dlAssignedOnly) {
+      setSyncProgress(
+        'Choose at least one state — or "Only bridges assigned to me" — before downloading.',
+      );
+      return;
+    }
     setSyncing(true);
     setSyncProgress('Starting download…');
     try {
+      let options: SyncBridgeCacheOptions = { states };
+      if (dlAssignedOnly) {
+        // Refresh the local assignments cache first (best effort), then
+        // download just those bridges instead of a whole state.
+        try {
+          await syncAssignments();
+        } catch {
+          // fall back to whatever assignments are already cached
+        }
+        const mine = await getAllAssignments().catch(() => []);
+        let ids = [...new Set(mine.map((a) => a.asset_id))];
+        if (states.length > 0) {
+          ids = ids.filter((id) =>
+            states.some((s) => id.startsWith(`${s}-`)),
+          );
+        }
+        if (ids.length === 0) {
+          setSyncProgress(
+            'No assignments found on this device yet. Download a state ' +
+              'inventory instead, or ask your firm admin to assign you bridges first.',
+          );
+          return;
+        }
+        options = { assetIds: ids };
+      }
       await syncBridgeCache((done: number, total: number) => {
         setSyncProgress(`Downloaded ${done} of ${total} bridges…`);
-      });
+      }, options);
       setSyncProgress('Complete');
       await refreshMeta();
     } catch (err) {
-      setSyncProgress(
-        `Sync failed: ${err instanceof Error ? err.message : String(err)}`
-      );
+      const msg =
+        err instanceof Error
+          ? err.message
+          : err && typeof err === 'object' && 'message' in err
+            ? String((err as { message: unknown }).message)
+            : JSON.stringify(err);
+      setSyncProgress(`Sync failed: ${msg}`);
     } finally {
       setSyncing(false);
     }
@@ -120,6 +169,62 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
   const count = cachedCount ?? 0;
   const hasInventory = cachedCount !== null && count > 0;
 
+  /** State / assigned-only chooser shown before any download starts. */
+  const renderDownloadChooser = (buttonLabel: string) => {
+    const checkRow = (
+      checked: boolean,
+      onChange: (v: boolean) => void,
+      label: string,
+    ) => (
+      <label
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          minHeight: 48,
+          cursor: 'pointer',
+          fontSize: 16,
+        }}
+      >
+        <input
+          type="checkbox"
+          checked={checked}
+          onChange={(e) => onChange(e.target.checked)}
+          disabled={syncing}
+          style={{ width: 22, height: 22, accentColor: '#CF3910' }}
+        />
+        <span>{label}</span>
+      </label>
+    );
+    return (
+      <div>
+        <div style={{ fontWeight: 600, marginBottom: 4 }}>
+          Which inventory do you want to download?
+        </div>
+        {checkRow(dlNc, setDlNc, 'North Carolina')}
+        {checkRow(dlSc, setDlSc, 'South Carolina')}
+        {checkRow(
+          dlAssignedOnly,
+          setDlAssignedOnly,
+          'Only bridges assigned to me',
+        )}
+        <button
+          className="btn"
+          style={{ minHeight: 56, width: '100%', fontSize: 18, marginTop: 8 }}
+          onClick={() => void handleSync()}
+          disabled={syncing}
+        >
+          {syncing ? 'Downloading…' : buttonLabel}
+        </button>
+        {syncProgress && (
+          <div className="muted" style={{ marginTop: 12 }}>
+            {syncProgress}
+          </div>
+        )}
+      </div>
+    );
+  };
+
   if (cachedCount === null) {
     return (
       <div className="screen">
@@ -139,19 +244,7 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
             No bridges are cached on this device. Download the inventory before
             inspecting.
           </p>
-          <button
-            className="btn"
-            style={{ minHeight: 56, width: '100%', fontSize: 18 }}
-            onClick={handleSync}
-            disabled={syncing}
-          >
-            {syncing ? 'Downloading…' : 'Download bridge inventory'}
-          </button>
-          {syncProgress && (
-            <div className="muted" style={{ marginTop: 12 }}>
-              {syncProgress}
-            </div>
-          )}
+          {renderDownloadChooser('Download bridge inventory')}
         </div>
       </div>
     );
@@ -209,6 +302,11 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
       </div>
 
       <div className="card">
+        <h3 style={{ marginTop: 0 }}>Download more inventory</h3>
+        {renderDownloadChooser('Download selected inventory')}
+      </div>
+
+      <div className="card">
         <h3 style={{ marginTop: 0 }}>Nearby uninspected</h3>
         <button
           className="btn"
@@ -236,8 +334,7 @@ const BridgeLookup: React.FC<BridgeLookupProps> = ({ onSelect }) => {
                 (b as unknown as { asset_id?: string }).asset_id ?? b.struct_no ??
                 (b as unknown as { id?: string }).id ??
                 '';
-              const county =
-                (b as unknown as { county?: string }).county ?? '';
+              const county = b.county_name ?? b.county ?? '';
               const facility =
                 (b as unknown as { facility?: string }).facility ?? '';
               return (

@@ -535,6 +535,7 @@ export async function getExistingFirmAssignments(
 
 export interface BridgeMeta {
   asset_id: string;
+  county: string | null;
   county_name: string | null;
   facility: string | null;
   feature: string | null;
@@ -551,12 +552,13 @@ export async function getBridgeMeta(assetIds: string[]): Promise<Map<string, Bri
   for (let i = 0; i < uniq.length; i += 500) {
     const { data, error } = await sb
       .from('emg_bridges')
-      .select('asset_id,county_name,facility,feature,lat,lon')
+      .select('asset_id,county,county_name,facility,feature,lat,lon')
       .in('asset_id', uniq.slice(i, i + 500));
     if (error) throw error;
     for (const r of (data ?? []) as unknown as BridgeMeta[]) {
       map.set(r.asset_id, {
         asset_id: r.asset_id,
+        county: r.county ?? null,
         county_name: r.county_name ?? null,
         facility: r.facility ?? null,
         feature: r.feature ?? null,
@@ -589,7 +591,7 @@ export async function buildStateBridgeRows(data: StateData): Promise<StateBridge
         asset_id,
         firm_id: fid,
         firm_name: fid ? (firmName.get(fid) ?? '—') : '—',
-        county: m?.county_name ?? null,
+        county: m?.county_name ?? m?.county ?? null,
         facility: m?.facility ?? null,
         inspector: asg?.assigned_to ?? insp?.inspector_name ?? null,
         assignStatus: asg?.status ?? null,
@@ -617,7 +619,7 @@ export async function getBridgeDetail(assetId: string, data: StateData): Promise
   try {
     const meta = await getBridgeMeta([assetId]);
     const m = meta.get(assetId);
-    county = m?.county_name ?? null;
+    county = m?.county_name ?? m?.county ?? null;
     facility = m?.facility ?? null;
     feature = m?.feature ?? null;
   } catch {

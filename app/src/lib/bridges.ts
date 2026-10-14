@@ -61,38 +61,96 @@ const BRIDGE_SELECT =
   'truck_pct,insp_freq,last_inspect,maint,owner,status,bridge_cond,lowest,span_mat,' +
   'span_type,lon,lat';
 
-/** Download the full inventory into the IndexedDB cache. Shows progress. */
+export interface SyncBridgeCacheOptions {
+  /** Restrict the download to these state codes ('SC', 'NC'): only
+   *  bridges whose asset_id starts with `<state>-` are fetched. */
+  states?: string[];
+  /** Download ONLY these bridges (e.g. the inspector's assignments).
+   *  Takes precedence over `states` when non-empty. */
+  assetIds?: string[];
+}
+
+/**
+ * Download bridge inventory into the IndexedDB cache, with progress.
+ * With no options this downloads the ENTIRE inventory; callers that
+ * offer a choice (BridgeLookup's chooser) pass `states` or `assetIds`
+ * to scope the download.
+ */
 export async function syncBridgeCache(
   onProgress?: (done: number, total: number) => void,
+  options?: SyncBridgeCacheOptions,
 ): Promise<number> {
   const sb = getSupabase();
   if (!sb) throw new Error('Supabase is not configured');
-  let expected = 0;
-  try {
-    const { count } = await sb
-      .from('emg_bridges')
-      .select('asset_id', { count: 'exact', head: true });
-    if (typeof count === 'number') expected = count;
-  } catch {
-    // Progress total is cosmetic; the page loop below still downloads everything.
-  }
-  let offset = 0;
   let total = 0;
-  for (;;) {
-    const { data, error } = await sb
-      .from('emg_bridges')
-      .select(BRIDGE_SELECT)
-      .order('asset_id', { ascending: true })
-      .range(offset, offset + PAGE - 1);
-    if (error) throw error;
-    const rows = ((data ?? []) as unknown as Record<string, unknown>[]).map(rowToBridge);
-    if (rows.length === 0) break;
-    await idbBulkPut('bridges', rows);
+
+  const putRows = async (rows: Record<string, unknown>[]) => {
+    if (rows.length === 0) return;
+    await idbBulkPut('bridges', rows.map(rowToBridge));
     total += rows.length;
-    onProgress?.(total, expected || total);
-    if (rows.length < PAGE) break;
-    offset += PAGE;
+  };
+
+  if (options?.assetIds && options.assetIds.length > 0) {
+    // Scoped download: page through the requested id list with .in().
+    const ids = [...new Set(options.assetIds)];
+    for (let i = 0; i < ids.length; i += 500) {
+      const { data, error } = await sb
+        .from('emg_bridges')
+        .select(BRIDGE_SELECT)
+        .in('asset_id', ids.slice(i, i + 500));
+      if (error) throw error;
+      await putRows((data ?? []) as unknown as Record<string, unknown>[]);
+      onProgress?.(total, ids.length);
+    }
+  } else {
+    const prefixes = (options?.states ?? []).map((s) => `${s}-`);
+    let expected = 0;
+    try {
+      let countQuery = sb
+        .from('emg_bridges')
+        .select('asset_id', { count: 'exact', head: true });
+      if (prefixes.length === 1) {
+        countQuery = countQuery.like('asset_id', `${prefixes[0]}%`);
+      } else if (prefixes.length > 1) {
+        countQuery = countQuery.or(
+          prefixes.map((p) => `asset_id.like.${p}%`).join(','),
+        );
+      }
+      const { count } = await countQuery;
+      if (typeof count === 'number') expected = count;
+    } catch {
+      // Progress total is cosmetic; the page loops below still run.
+    }
+
+    const pagePrefix = async (prefix: string | null) => {
+      let offset = 0;
+      for (;;) {
+        let q = sb
+          .from('emg_bridges')
+          .select(BRIDGE_SELECT)
+          .order('asset_id', { ascending: true })
+          .range(offset, offset + PAGE - 1);
+        if (prefix) q = q.like('asset_id', `${prefix}%`);
+        const { data, error } = await q;
+        if (error) throw error;
+        const rows = (data ?? []) as unknown as Record<string, unknown>[];
+        if (rows.length === 0) break;
+        await putRows(rows);
+        onProgress?.(total, expected || total);
+        if (rows.length < PAGE) break;
+        offset += PAGE;
+      }
+    };
+
+    if (prefixes.length === 0) {
+      await pagePrefix(null);
+    } else {
+      for (const prefix of prefixes) {
+        await pagePrefix(prefix);
+      }
+    }
   }
+
   await idbPut('meta', { key: 'bridges_synced_at', value: new Date().toISOString() });
   await idbPut('meta', { key: 'bridges_count', value: total });
   return total;

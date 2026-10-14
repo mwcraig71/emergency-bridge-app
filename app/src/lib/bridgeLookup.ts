@@ -7,7 +7,7 @@ import type { Bridge } from '../types';
 
 export type BridgeState = 'SC' | 'NC';
 
-const BRIDGE_SELECT = 'asset_id,struct_no,facility,county_name,district';
+const BRIDGE_SELECT = 'asset_id,struct_no,facility,county,county_name,district';
 
 /**
  * Normalize a raw pasted ID into candidate asset_id forms.
