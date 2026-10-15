@@ -157,9 +157,14 @@ h3 { font-size: 16px; margin: 6px 0 8px; font-weight: 500; }
   border: 2px solid var(--line); border-radius: var(--radius);
   background: #fff; color: var(--ink); cursor: pointer;
 }
-.seg button[aria-pressed="true"].yes { background: var(--status-good); border-color: var(--status-good); color: #fff; }
-.seg button[aria-pressed="true"].no { background: var(--status-critical); border-color: var(--status-critical); color: #fff; }
-.seg button[aria-pressed="true"].pick { background: var(--brand); border-color: var(--brand); color: #fff; }
+/* Selected state must be unmistakable in sunlight: filled + bold + white
+   text. The previous [aria-pressed].yes/.no/.pick rules never matched
+   (the buttons signal selection with .active) and .seg button's white
+   background outranked .btn's accent fill, so a SELECTED button rendered
+   plainer than the unselected one next to it. */
+.seg button.active, .choice button.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 700; }
+.seg button.active.yes, .choice button.active.yes { background: var(--status-good); border-color: var(--status-good); color: #fff; }
+.seg button.active.no, .choice button.active.no { background: var(--status-critical); border-color: var(--status-critical); color: #fff; }
 
 /* ---- Choice list ---- */
 .choice {

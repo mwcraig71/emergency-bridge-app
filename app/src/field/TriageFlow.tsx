@@ -127,7 +127,7 @@ function Segmented<T extends string>(props: SegProps<T>) {
             <button
               key={opt.value}
               type="button"
-              className={`btn${active ? ' active' : ' secondary'}`}
+              className={`btn ${opt.value === 'yes' ? 'yes' : opt.value === 'no' ? 'no' : 'pick'}${active ? ' active' : ' secondary'}`}
               aria-pressed={active}
               onClick={() => onChange(opt.value)}
               style={{ flex: 1, minHeight: 52 }}
@@ -162,7 +162,7 @@ function ChoiceList<T extends string>(props: ChoiceProps<T>) {
               type="button"
               role="radio"
               aria-checked={active}
-              className={`btn${active ? ' active' : ' secondary'}`}
+              className={`btn ${opt.value === 'yes' ? 'yes' : opt.value === 'no' ? 'no' : 'pick'}${active ? ' active' : ' secondary'}`}
               onClick={() => onChange(opt.value)}
               style={{ minHeight: 48, textAlign: 'left' }}
             >
@@ -498,7 +498,7 @@ export default function TriageFlow(props: TriageFlowProps) {
         <div className="seg" role="group" aria-label="Was the bridge destroyed?">
           <button
             type="button"
-            className={`btn${draft.destroyed === 'yes' ? ' active' : ' secondary'}`}
+            className={`btn yes${draft.destroyed === 'yes' ? ' active' : ' secondary'}`}
             style={{ flex: 1, minHeight: 56 }}
             onClick={() => {
               setYesNo('destroyed', 'yes');
@@ -509,7 +509,7 @@ export default function TriageFlow(props: TriageFlowProps) {
           </button>
           <button
             type="button"
-            className={`btn${draft.destroyed === 'no' ? ' active' : ' secondary'}`}
+            className={`btn no${draft.destroyed === 'no' ? ' active' : ' secondary'}`}
             style={{ flex: 1, minHeight: 56 }}
             onClick={() => {
               setYesNo('destroyed', 'no');
@@ -562,7 +562,7 @@ export default function TriageFlow(props: TriageFlowProps) {
       <div className="seg" role="group" aria-label="Were you able to access the bridge?">
         <button
           type="button"
-          className={`btn${draft.access === 'yes' ? ' active' : ' secondary'}`}
+          className={`btn yes${draft.access === 'yes' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
           onClick={() => {
             setYesNo('access', 'yes');
@@ -573,7 +573,7 @@ export default function TriageFlow(props: TriageFlowProps) {
         </button>
         <button
           type="button"
-          className={`btn${draft.access === 'no' ? ' active' : ' secondary'}`}
+          className={`btn no${draft.access === 'no' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
           onClick={() => {
             setYesNo('access', 'no');
@@ -592,7 +592,7 @@ export default function TriageFlow(props: TriageFlowProps) {
       <div className="seg" role="group" aria-label="Was drone reconnaissance used?">
         <button
           type="button"
-          className={`btn${draft.drone_used === 'yes' ? ' active' : ' secondary'}`}
+          className={`btn yes${draft.drone_used === 'yes' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
           onClick={() => {
             setYesNo('drone_used', 'yes');
@@ -603,7 +603,7 @@ export default function TriageFlow(props: TriageFlowProps) {
         </button>
         <button
           type="button"
-          className={`btn${draft.drone_used === 'no' ? ' active' : ' secondary'}`}
+          className={`btn no${draft.drone_used === 'no' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
           onClick={() => {
             setYesNo('drone_used', 'no');
@@ -648,7 +648,7 @@ export default function TriageFlow(props: TriageFlowProps) {
       <div className="seg" role="group" aria-label="Is the bridge still there?">
         <button
           type="button"
-          className={`btn${draft.bridge_still_there === 'no' ? ' active' : ' secondary'}`}
+          className={`btn no${draft.bridge_still_there === 'no' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
           onClick={() => {
             setYesNo('bridge_still_there', 'no');
@@ -659,7 +659,7 @@ export default function TriageFlow(props: TriageFlowProps) {
         </button>
         <button
           type="button"
-          className={`btn${draft.bridge_still_there === 'yes' ? ' active' : ' secondary'}`}
+          className={`btn yes${draft.bridge_still_there === 'yes' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
           onClick={() => {
             setYesNo('bridge_still_there', 'yes');
@@ -709,7 +709,7 @@ export default function TriageFlow(props: TriageFlowProps) {
       <div className="seg" role="group" aria-label="Has the bridge overtopped?">
         <button
           type="button"
-          className={`btn${draft.overtopped === 'yes' ? ' active' : ' secondary'}`}
+          className={`btn yes${draft.overtopped === 'yes' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
           onClick={() =>
             setDraft((d) => ({
@@ -724,7 +724,7 @@ export default function TriageFlow(props: TriageFlowProps) {
         </button>
         <button
           type="button"
-          className={`btn${draft.overtopped === 'no' ? ' active' : ' secondary'}`}
+          className={`btn no${draft.overtopped === 'no' ? ' active' : ' secondary'}`}
           style={{ flex: 1, minHeight: 56 }}
           onClick={() =>
             setDraft((d) => ({
