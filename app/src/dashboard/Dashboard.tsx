@@ -651,6 +651,7 @@ export default function Dashboard({
                   <p className="muted">No inspections recorded for this bridge.</p>
                 )}
                 {inspections && inspections.length > 0 && (
+                  <div className="table-scroll">
                   <table className="data">
                     <thead>
                       <tr>
@@ -682,6 +683,7 @@ export default function Dashboard({
                       })}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             )}

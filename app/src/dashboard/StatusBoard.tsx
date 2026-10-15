@@ -353,6 +353,7 @@ export default function StatusBoard({
             </label>
           </div>
 
+          <div className="table-scroll">
           <table className="data">
             <thead>
               <tr>
@@ -418,13 +419,14 @@ export default function StatusBoard({
               )}
             </tbody>
           </table>
+          </div>
         </>
       )}
 
       <style>{`
         .status-board {
-          color: #e2e8f0;
-          font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+          color: #1A1A1A;
+          font-family: var(--font-body);
         }
         .status-board h2 {
           margin: 0 0 10px;
@@ -469,7 +471,7 @@ export default function StatusBoard({
         .stat-reduced_load .stat-count { color: #C9A227; }
         .stat-restricted_lanes .stat-count { color: #C9A227; }
         .stat-open .stat-count { color: #2E7D32; }
-        .stat-not_started .stat-count { color: #9A9A9A; }
+        .stat-not_started .stat-count { color: #5A5A5A; }
 
         .filters {
           display: flex;
@@ -480,10 +482,12 @@ export default function StatusBoard({
         .filters label {
           display: flex;
           flex-direction: column;
+          flex: 1 1 120px;
+          min-width: 0;
           font-size: 11px;
           text-transform: uppercase;
           letter-spacing: 0.04em;
-          color: #94a3b8;
+          color: #334155;
           gap: 4px;
         }
         .filters select,
@@ -494,7 +498,9 @@ export default function StatusBoard({
           border-radius: 2px;
           padding: 5px 8px;
           font-size: 13px;
-          min-width: 110px;
+          width: 100%;
+          min-width: 0;
+          max-width: 100%;
           min-height: 40px;
         }
 
@@ -524,43 +530,47 @@ export default function StatusBoard({
           user-select: none;
         }
         table.data th.sortable:hover {
-          color: #e2e8f0;
+          color: #B9C6E8;
         }
         table.data tbody tr.row-clickable {
           cursor: pointer;
         }
         table.data tbody tr.row-clickable:hover {
-          background: #273449;
+          background: #EAF0FA;
         }
 
+        /* Light-theme pills: same colors as the global .pill status
+           palette in styles.css (solid status color, white or black
+           text), squared corners per the Strinteg theme. */
         .pill {
           display: inline-block;
           padding: 2px 8px;
-          border-radius: 999px;
+          border-radius: 2px;
           font-size: 11px;
           font-weight: 600;
-          background: #334155;
-          color: #e2e8f0;
+          background: #DDDDDD;
+          color: #1A1A1A;
           margin-right: 4px;
         }
-        .pill-open { background: #14532d; color: #bbf7d0; }
-        .pill-restricted_lanes { background: #7c2d12; color: #fed7aa; }
-        .pill-reduced_load { background: #7c2d12; color: #fed7aa; }
-        .pill-closed { background: #7f1d1d; color: #fecaca; }
-        .pill-destroyed { background: #450a0a; color: #fecaca; }
-        .pill-likely_destroyed { background: #450a0a; color: #fecaca; }
-        .pill-revisit { background: #713f12; color: #fde68a; }
-        .pill-ground_followup { background: #713f12; color: #fde68a; }
-        .pill-not_started { background: #334155; color: #cbd5e1; }
+        .pill-open { background: var(--status-good); color: #fff; }
+        .pill-restricted_lanes { background: var(--status-fair); color: var(--strinteg-black); }
+        .pill-reduced_load { background: var(--status-fair); color: var(--strinteg-black); }
+        .pill-closed { background: var(--status-critical); color: #fff; }
+        .pill-destroyed { background: var(--status-critical); color: #fff; }
+        .pill-likely_destroyed { background: var(--status-poor); color: #fff; }
+        .pill-revisit { background: var(--status-fair); color: var(--strinteg-black); }
+        .pill-ground_followup { background: var(--brand); color: #fff; }
+        .pill-not_started { background: #DDDDDD; color: #1A1A1A; }
         .pill.stale {
-          background: #78350f;
-          color: #fde68a;
+          background: var(--status-fair-tint);
+          color: var(--strinteg-black);
+          border: 1px solid var(--status-fair);
           margin-left: 4px;
           font-size: 10px;
         }
 
-        .muted {
-          color: #94a3b8;
+        .status-board .muted {
+          color: #5A5A5A;
           font-size: 13px;
         }
       `}</style>

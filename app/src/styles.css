@@ -280,7 +280,9 @@ h3 { font-size: 16px; margin: 6px 0 8px; font-weight: 500; }
 /* ---- Dashboard (desktop-first, responsive) ---- */
 .dash { max-width: 1440px; margin: 0 auto; padding: 16px; }
 .dash-grid { display: grid; grid-template-columns: 1fr 380px; gap: 16px; }
-@media (max-width: 1000px) { .dash-grid { grid-template-columns: 1fr; } }
+/* Collapse breakpoint is re-declared after the later .dash-grid rule
+   below (same specificity, later wins) — keep the two in sync. */
+@media (max-width: 1150px) { .dash-grid { grid-template-columns: 1fr; } }
 .dash .map-wrap { height: 62vh; }
 
 .dash-header { margin-bottom: 12px; }
@@ -351,6 +353,11 @@ table.data th {
   letter-spacing: 0.1em; text-transform: uppercase;
 }
 table.data tr:hover td { background: #F7F9FD; cursor: pointer; }
+/* Wide tables scroll horizontally inside their card instead of
+   overflowing it (tablet portrait). The table keeps its natural
+   width; the wrapper clips and scrolls. */
+.table-scroll { overflow-x: auto; -webkit-overflow-scrolling: touch; max-width: 100%; }
+.table-scroll > table.data { width: max-content; min-width: 100%; }
 .filters { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
 .filters select, .filters input {
   min-height: 44px; border: 2px solid var(--line); border-radius: var(--radius);
@@ -477,10 +484,18 @@ code, .mono { font-family: 'SF Mono', ui-monospace, Menlo, Consolas, monospace; 
   background: #fff; color: var(--ink);
   border: 2px solid var(--line); border-radius: var(--radius);
   padding: 6px 10px; font-size: 14px; font-family: var(--font-body);
-  min-height: 40px;
+  min-height: 40px; max-width: 100%;
 }
 .dash code { background: #EAF0FA; padding: 1px 5px; border-radius: var(--radius); font-size: 12px; }
 .dash-grid { display: grid; grid-template-columns: 1fr 380px; gap: 16px; padding: 16px; flex: 1; align-items: start; }
+/* Grid children must be allowed to shrink below their content's
+   min-content width, or a wide table blows out its track and slides
+   under the sidebar. Wide content scrolls inside its card instead
+   (see .table-scroll). */
+.dash-grid > * { min-width: 0; }
+/* Two columns only on genuinely wide screens; a tablet in portrait
+   (~800px) gets a single column with the sidebar stacked below. */
+@media (max-width: 1150px) { .dash-grid { grid-template-columns: 1fr; } }
 .dash-main { min-width: 0; }
 .dash-sidebar { display: flex; flex-direction: column; gap: 16px; }
 .dash .card h1 { font-size: 18px; }

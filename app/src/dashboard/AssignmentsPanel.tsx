@@ -1010,7 +1010,7 @@ export default function AssignmentsPanel({
           <p className="muted">No assignments found.</p>
         )}
         {filtered.length > 0 && (
-          <div style={{ overflowX: 'auto' }}>
+          <div className="table-scroll">
             <table className="data">
               <thead>
                 <tr>

@@ -544,7 +544,7 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
                   assign bridge groups.
                 </p>
               ) : (
-                <div style={{ overflowX: 'auto' }}>
+                <div className="table-scroll">
                   <table className="data">
                     <thead>
                       <tr>
@@ -690,7 +690,7 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
                 <p className="muted">No bridges match the current filters.</p>
               ) : (
                 <>
-                  <div style={{ overflowX: 'auto' }}>
+                  <div className="table-scroll">
                     <table className="data">
                       <thead>
                         <tr>
