@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation } from 'react-router-dom';
 import FieldApp from './field/FieldApp';
 import Dashboard from './dashboard/Dashboard';
@@ -37,6 +37,27 @@ function EnvNav({
   onSignOut: () => void;
 }) {
   const loc = useLocation();
+  const navRef = useRef<HTMLElement | null>(null);
+  // Publish the nav's real height (it wraps to two rows on narrow
+  // screens) so the field app's fixed full-screen map can start below
+  // it instead of sliding underneath and hiding its top controls.
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el) return;
+    const publish = () => {
+      document.documentElement.style.setProperty(
+        '--app-header-height',
+        `${el.offsetHeight}px`,
+      );
+    };
+    publish();
+    const ro = new ResizeObserver(publish);
+    ro.observe(el);
+    return () => {
+      ro.disconnect();
+      document.documentElement.style.setProperty('--app-header-height', '0px');
+    };
+  }, []);
   const path = loc.pathname;
   const active = path.startsWith('/statedashboard')
     ? 'state'
@@ -45,7 +66,7 @@ function EnvNav({
       : 'field';
   const role = profile?.role ?? 'firm_admin';
   return (
-    <nav className="env-nav">
+    <nav className="env-nav" ref={navRef}>
       <span className="brandmark" aria-label="Strinteg">
         <span className="str">STR</span>INTEG
       </span>

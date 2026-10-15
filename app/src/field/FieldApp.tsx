@@ -869,7 +869,19 @@ const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
   };
 
   const renderMap = () => (
-    <div style={{ position: 'fixed', top: 0, left: 0, right: 0, bottom: 64, zIndex: 1 }}>
+    <div
+      style={{
+        position: 'fixed',
+        // Start below the app nav (its height is published as
+        // --app-header-height): at top: 0 the map slid under the nav
+        // and the Recency filter + Offline map button were hidden.
+        top: 'var(--app-header-height, 0px)',
+        left: 0,
+        right: 0,
+        bottom: 64,
+        zIndex: 1,
+      }}
+    >
       <TeamMap
         showTeam
         showLocate
