@@ -169,9 +169,25 @@ export async function fetchAdminProfile(
   authUserId: string,
   email: string,
 ): Promise<AdminProfile> {
-  const legacy: AdminProfile = { role: 'firm_admin', email };
+  const resolved = await fetchAdminProfileStrict(authUserId, email);
+  return resolved ?? { role: 'firm_admin', email };
+}
+
+/**
+ * Strict variant of fetchAdminProfile: returns the resolved profile ONLY
+ * when a real emg_admins row was found. Returns null when no row exists,
+ * the table is unreachable, or Supabase is not configured — i.e. exactly
+ * the cases where fetchAdminProfile substitutes the legacy default.
+ *
+ * Used by the launch-time self-heal in App.tsx, which must never let a
+ * failed or offline re-check overwrite (downgrade) a stored profile.
+ */
+export async function fetchAdminProfileStrict(
+  authUserId: string,
+  email: string,
+): Promise<AdminProfile | null> {
   const sb = getSupabase();
-  if (!sb) return legacy;
+  if (!sb) return null;
   try {
     let row: EmgAdminRow | null = null;
     const byId = await sb
@@ -186,7 +202,7 @@ export async function fetchAdminProfile(
         .select('role,state_code,firm_id')
         .eq('email', email)
         .maybeSingle();
-      if (byEmail.error) return legacy;
+      if (byEmail.error) return null;
       row = (byEmail.data as EmgAdminRow | null) ?? null;
       if (row) {
         // Best-effort link so the next sign-in finds the row by id.
@@ -200,7 +216,7 @@ export async function fetchAdminProfile(
         }
       }
     }
-    if (!row) return legacy;
+    if (!row) return null;
     return {
       role: row.role,
       email,
@@ -208,7 +224,7 @@ export async function fetchAdminProfile(
       firmId: row.firm_id ?? null,
     };
   } catch {
-    return legacy;
+    return null;
   }
 }
 

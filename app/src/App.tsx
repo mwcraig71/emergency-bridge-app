@@ -7,13 +7,29 @@ import LoginScreen from './components/LoginScreen';
 import UpdateButton from './components/UpdateButton';
 import {
   clearSession,
+  fetchAdminProfileStrict,
   getAdminProfile,
   getSession,
   restoreAdminSession,
+  setSession as persistAuthSession,
   type AuthSession,
 } from './lib/auth';
 import type { AdminProfile } from './types';
 import { getSupabase } from './lib/supabase';
+import { setCurrentFirmId } from './lib/firm';
+
+function sameAdminProfile(
+  a: AdminProfile | null,
+  b: AdminProfile | null,
+): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.role === b.role &&
+    a.email === b.email &&
+    (a.stateCode ?? null) === (b.stateCode ?? null) &&
+    (a.firmId ?? null) === (b.firmId ?? null)
+  );
+}
 
 function adminRoleLabel(profile: AdminProfile): string {
   switch (profile.role) {
@@ -119,12 +135,52 @@ export default function App() {
 
   useEffect(() => {
     (async () => {
-      const s = getSession();
+      let s = getSession();
       if (s?.kind === 'firm_admin') {
+        let restored = false;
         try {
-          await restoreAdminSession();
+          restored = await restoreAdminSession();
         } catch {
           // Admin data calls will report offline instead.
+        }
+        // Self-heal the stored role profile. It was resolved once at
+        // sign-in and baked into the session; if that fetch failed, the
+        // session silently carries the legacy firm_admin default and
+        // role-gated UI (e.g. State ops) stays hidden until sign-out.
+        // After a successful session restore, re-resolve the profile and
+        // adopt it ONLY when a real emg_admins row comes back — a
+        // failed/offline re-check must never downgrade a stored
+        // super_admin/state_admin profile, so any error or null result
+        // leaves the stored session exactly as-is.
+        if (restored) {
+          try {
+            const sb = getSupabase();
+            const { data } = (await sb?.auth.getUser()) ?? { data: null };
+            const user = data?.user;
+            if (sb && user) {
+              const fresh = await fetchAdminProfileStrict(user.id, s.email);
+              if (fresh && !sameAdminProfile(fresh, getAdminProfile(s))) {
+                const healed: AuthSession = {
+                  ...s,
+                  profile: fresh,
+                  firmId: fresh.firmId ?? undefined,
+                };
+                // A session returned by getSession() at launch came
+                // from localStorage (in-memory starts empty), so it was
+                // a remembered session — persist the healed profile the
+                // same way so the fresh role sticks across launches.
+                persistAuthSession(healed, true);
+                // Mirror sign-in: a firm-bound admin is scoped to their
+                // firm everywhere firm scoping applies.
+                if (fresh.role === 'firm_admin' && fresh.firmId) {
+                  setCurrentFirmId(fresh.firmId);
+                }
+                s = healed;
+              }
+            }
+          } catch {
+            // Re-check failed — keep the stored session exactly as-is.
+          }
         }
       }
       setSession(s);
