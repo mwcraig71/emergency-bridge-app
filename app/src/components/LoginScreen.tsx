@@ -35,21 +35,25 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
-  // Load firms: cache first, sync when the cache is empty and we're online.
+  // Load firms: when online, always refresh from the server (syncFirms
+  // also rewrites the cache) so a stale cached list can't hide firms that
+  // were added later. Fall back to the cache when offline or the sync
+  // fails — offline PIN login from cache keeps working as before.
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        let list = await getCachedFirms();
-        if (list.length === 0 && isOnline() && isSupabaseConfigured()) {
+        let list: Firm[] | null = null;
+        if (isOnline() && isSupabaseConfigured()) {
           setStatus('Downloading firm list…');
           try {
             list = await syncFirms();
           } catch {
-            // keep the empty list; the UI explains what's missing
+            list = null; // sync failed — fall back to the cache below
           }
           if (!cancelled) setStatus(null);
         }
+        if (list === null) list = await getCachedFirms();
         if (!cancelled) {
           setFirms(list);
           if (list.length > 0) setFirmId(list[0].id);
@@ -63,7 +67,10 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
     };
   }, []);
 
-  // Load the selected firm's roster: cache first, sync when empty and online.
+  // Load the selected firm's roster: when online, always refresh from the
+  // server (syncInspectors also rewrites the cached roster) so a stale
+  // cache can't hide inspectors added later. Fall back to the cache when
+  // offline or the sync fails — offline PIN login keeps working as before.
   useEffect(() => {
     if (!firmId) {
       setRoster([]);
@@ -73,17 +80,18 @@ export default function LoginScreen({ onSignedIn }: LoginScreenProps) {
     let cancelled = false;
     (async () => {
       try {
-        let list = await getFirmInspectors(firmId);
-        if (list.length === 0 && isOnline() && isSupabaseConfigured()) {
+        let list: Inspector[] | null = null;
+        if (isOnline() && isSupabaseConfigured()) {
           setStatus('Downloading team roster…');
           try {
             await syncInspectors(firmId);
             list = await getFirmInspectors(firmId);
           } catch {
-            // keep the empty list
+            list = null; // sync failed — fall back to the cache below
           }
           if (!cancelled) setStatus(null);
         }
+        if (list === null) list = await getFirmInspectors(firmId);
         if (!cancelled) {
           setRoster(list);
           setInspectorId((prev) =>
