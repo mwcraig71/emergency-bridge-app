@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import TeamMap from '../components/TeamMap';
 import FirmBulkAssign from './FirmBulkAssign';
+import FormBuilder from './FormBuilder';
 import UploadNbi from './UploadNbi';
 import {
   loadStateData,
@@ -19,7 +20,7 @@ import {
 } from '../lib/stateDashboard';
 import type { EmgState, Firm } from '../types';
 
-type View = 'overview' | 'assign' | 'map' | 'inventory';
+type View = 'overview' | 'assign' | 'map' | 'inventory' | 'forms';
 
 const STATUS_OPTIONS = [
   { value: 'all', label: 'All statuses' },
@@ -383,6 +384,13 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
               onClick={() => setView('inventory')}
             >
               Upload NBI
+            </button>
+            <button
+              type="button"
+              className={view === 'forms' ? 'active' : ''}
+              onClick={() => setView('forms')}
+            >
+              Form Builder
             </button>
           </nav>
           {/* State selector lives IN the tabs row, right-aligned — a
@@ -773,6 +781,14 @@ export default function StateDashboard({ stateScope }: StateDashboardProps) {
         <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
           <main className="dash-main">
             <UploadNbi lockedState={effectiveScope} />
+          </main>
+        </div>
+      )}
+
+      {view === 'forms' && (
+        <div className="dash-grid" style={{ gridTemplateColumns: '1fr' }}>
+          <main className="dash-main">
+            <FormBuilder states={states} stateCode={effectiveScope} />
           </main>
         </div>
       )}

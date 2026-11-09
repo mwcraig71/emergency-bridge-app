@@ -341,6 +341,66 @@ export interface Bucket {
 }
 
 // ---------------------------------------------------------------------------
+// Per-state configurable questionnaires (migration 018) — State ops Form
+// Builder. Locked core + free state additions (Michael, 2026-11-09):
+// is_core questions (the system-mapped set + destroyed-gate photos) can
+// never be deleted, unmapped, re-triggered, retyped, or reworded by a
+// state; states add their own questions around them.
+// ---------------------------------------------------------------------------
+
+export type QuestionType =
+  | 'yes_no'
+  | 'text'
+  | 'number'
+  | 'single_choice'
+  | 'multi_choice'
+  | 'photo';
+
+export type FormTemplateStatus = 'draft' | 'published' | 'archived';
+
+/** One state's questionnaire at one version (emg_form_templates).
+ *  state_code NULL = the system default template. */
+export interface FormTemplate {
+  id: string;
+  state_code: string | null;
+  name: string;
+  version: number;
+  status: FormTemplateStatus;
+  is_default: boolean;
+  created_by: string | null;
+  created_at: string;
+  published_at: string | null;
+  published_by: string | null;
+}
+
+/** One choice option on a single/multi-choice question. */
+export interface QuestionOption {
+  value: string;
+  label: string;
+}
+
+/** One question in a template's tree (emg_form_questions). A child
+ *  (parent_question_id set) is visible only when the parent's answer
+ *  matches trigger_answer. maps_to_system_field names the core
+ *  emg_inspections column the answer also writes through to (Phase 2). */
+export interface FormQuestion {
+  id: string;
+  template_id: string;
+  parent_question_id: string | null;
+  trigger_answer: string | null;
+  sort_order: number;
+  type: QuestionType;
+  prompt: string;
+  help_text: string | null;
+  required: boolean;
+  is_core: boolean;
+  options: QuestionOption[] | null;
+  config: Record<string, unknown> | null;
+  maps_to_system_field: string | null;
+  created_at: string;
+}
+
+// ---------------------------------------------------------------------------
 // DriveNC (NCDOT) secondary data — cached in IndexedDB, rendered dimmed
 // UNDER inspector ground-truth pins. Inspector pins always win visually.
 // ---------------------------------------------------------------------------
