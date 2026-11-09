@@ -106,7 +106,29 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
         sync_status: 'synced',
         client_inspection_id: d.client_inspection_id,
         firm_id: d.firm_id ?? getCurrentFirmId(),
+        // Questionnaire (Phase 2): which template version produced this
+        // record. Legacy inspections carry neither and stay NULL.
+        form_template_id: d.form_template_id ?? null,
+        form_version: d.form_version ?? null,
       };
+      // Drafts started from the compiled-in default template (device had
+      // never synced a template) carry form answers but no template id —
+      // resolve the real default template id now that we're online, so
+      // the record points at the actual published default. Best-effort:
+      // if the lookup fails the row simply stays NULL, like a legacy
+      // inspection, and the answers' snapshots remain the record.
+      if (!row.form_template_id && (d.form_answers?.length ?? 0) > 0) {
+        try {
+          const { data: def } = await sb
+            .from('emg_form_templates')
+            .select('id')
+            .eq('is_default', true)
+            .maybeSingle();
+          if (def) row.form_template_id = (def as { id: string }).id;
+        } catch {
+          // Leave NULL.
+        }
+      }
       // Newest-wins upsert on the client dedupe key.
       const { error } = await sb
         .from('emg_inspections')
@@ -130,6 +152,27 @@ async function pushOne(sb: any, item: SyncQueueItem): Promise<void> {
         } catch (e) {
           const msg = e instanceof Error ? e.message : String(e);
           throw new Error(`photo (${photo.id.slice(0, 8)}): ${msg}`);
+        }
+      }
+      // Questionnaire answers ride with the inspection (Phase 2):
+      // upserted on (inspection_id, question_id) in the same queue item,
+      // so a failure keeps the whole item queued — same semantics as
+      // photos. Snapshots travel with each answer, keeping the record
+      // readable after the state edits its template.
+      if ((d.form_answers?.length ?? 0) > 0) {
+        const answerRows = (d.form_answers ?? []).map((a) => ({
+          inspection_id: serverId,
+          question_id: a.question_id,
+          prompt_snapshot: a.prompt_snapshot,
+          type_snapshot: a.type_snapshot,
+          sort_snapshot: a.sort_snapshot,
+          answer: a.answer,
+        }));
+        const { error: ansError } = await sb
+          .from('emg_inspection_answers')
+          .upsert(answerRows, { onConflict: 'inspection_id,question_id' });
+        if (ansError) {
+          throw new Error(`form answers: ${ansError.message}`);
         }
       }
       // Mark the local draft as synced so pendingCount doesn't count it.

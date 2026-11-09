@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import BridgeLookup from './BridgeLookup';
-import TriageFlow from './TriageFlow';
+import FormFlow from './FormFlow';
 import RoadblockReport from './RoadblockReport';
 import DirectionsView from './DirectionsView';
 import TeamMap from '../components/TeamMap';
@@ -15,6 +15,8 @@ import {
   isSameSession,
 } from '../lib/crashSession';
 import { pushQueue, pendingCount, pendingPhotos, clearQueue } from '../lib/sync';
+import { syncFormTemplates } from '../lib/formSync';
+import { getCachedFirms } from '../lib/firm';
 import { syncRoadblocks } from '../lib/roadblocks';
 import { startPositionBroadcast, stopPositionBroadcast } from '../lib/teamPositions';
 import {
@@ -292,6 +294,26 @@ const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
     void refreshDrafts();
   }, [refreshDrafts]);
 
+  // Questionnaire templates: refresh the offline cache on entry, same
+  // pass that brings firms/rosters down at login (best effort, silent).
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const firms = await getCachedFirms();
+        const states = [...new Set(firms.flatMap((f) => f.states ?? []))];
+        if (!cancelled && states.length > 0) {
+          await syncFormTemplates(states);
+        }
+      } catch {
+        // Offline / not configured — compiled-in default applies.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   useEffect(() => {
     if (nameLoaded) void refreshAssignments(inspectorName);
   }, [nameLoaded, inspectorName, refreshAssignments]);
@@ -525,6 +547,16 @@ const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
       } catch {
         // Roadblock sync failure must not mask the main sync result.
       }
+      // Form templates: refresh the offline questionnaire cache for every
+      // state the cached firms serve (best effort — the compiled-in
+      // default covers a device that has never synced one).
+      try {
+        const firms = await getCachedFirms();
+        const states = [...new Set(firms.flatMap((f) => f.states ?? []))];
+        if (states.length > 0) await syncFormTemplates(states);
+      } catch {
+        // Template sync failure must not mask the main sync result.
+      }
       setSyncResult(
         result.failed > 0
           ? `Sync: ${result.pushed} pushed, ${result.failed} failed.\n${result.errors.join('\n')}`
@@ -630,7 +662,7 @@ const FieldApp: React.FC<FieldAppProps> = ({ inspectorName: sessionName }) => {
   const renderInspect = () => {
     if (activeBridge) {
       return (
-        <TriageFlow
+        <FormFlow
           bridge={activeBridge}
           inspectorName={inspectorName}
           existingDraft={resumeDraft ?? undefined}

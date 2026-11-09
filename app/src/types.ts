@@ -85,7 +85,9 @@ export type PhotoType =
 
 export interface PhotoRef {
   id: string; // client-side uuid
-  photo_type: PhotoType;
+  /** Legacy slot types (PhotoType) or 'form:<question_id>' for photos
+   *  captured against a state-added form question (Phase 2). */
+  photo_type: PhotoType | string;
   description?: string; // required for condition/debris
   dataUrl?: string; // local preview (not persisted to server)
   storage_path?: string; // set after upload
@@ -126,6 +128,21 @@ export interface InspectionDraft {
   updated_at: string;
   /** Owning firm (multi-tenancy). Null = pre-firm legacy / no firm selected. */
   firm_id?: string | null;
+  /** Questionnaire (Phase 2): the published template this inspection was
+   *  started under. Null on legacy drafts and on drafts started from the
+   *  compiled-in default before any template sync (resolved to the real
+   *  default template id at push time — see lib/sync.ts). */
+  form_template_id?: string | null;
+  /** Template version stamped at draft start; in-progress drafts keep
+   *  their version even if a newer one publishes mid-event. */
+  form_version?: number | null;
+  /** Per-question answers with prompt/type snapshots, keyed by
+   *  question_id. Part of the draft record so crash-resume keeps them. */
+  form_answers?: FormAnswerDraft[];
+  /** Snapshot of the template's questions at draft start — makes the
+   *  draft self-contained offline (no template lookup needed to resume
+   *  or render). */
+  form_questions?: FormQuestion[];
 }
 
 export interface Roadblock {
@@ -371,6 +388,42 @@ export interface FormTemplate {
   created_at: string;
   published_at: string | null;
   published_by: string | null;
+}
+
+/** Answer payload shapes stored in emg_inspection_answers.answer
+ *  (design §4.4). Photo answers link PhotoRef ids; the photos themselves
+ *  live on the draft / emg_inspection_photos. */
+export type FormAnswerValue =
+  | { value: string }
+  | { value: string[] }
+  | { value: number }
+  | { value: null; unknown: true }
+  | { value: string | null }
+  | { photo_ids: string[] };
+
+/** One answered question on a draft: the answer plus the prompt/type/
+ *  sort snapshots copied at draft creation, so the draft (and later the
+ *  synced emg_inspection_answers row) stays readable even after the
+ *  state edits or deletes the question. */
+export interface FormAnswerDraft {
+  question_id: string;
+  prompt_snapshot: string;
+  type_snapshot: QuestionType;
+  sort_snapshot: number;
+  answer: FormAnswerValue;
+}
+
+/** A published template + its questions cached in IndexedDB for offline
+ *  field use (store 'form_templates', keyPath 'key'). `for_state` is the
+ *  state the template was resolved FOR — when a state has no published
+ *  template of its own, the cached record holds the system default under
+ *  that state's key. */
+export interface CachedFormTemplate {
+  key: string; // `${for_state}:${version}`
+  for_state: string; // state code, or 'DEFAULT' for the bare default
+  template: FormTemplate;
+  questions: FormQuestion[];
+  fetched_at: string;
 }
 
 /** One choice option on a single/multi-choice question. */

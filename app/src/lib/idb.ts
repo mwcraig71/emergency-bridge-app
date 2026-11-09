@@ -3,7 +3,7 @@
 import { openDB, type IDBPDatabase } from 'idb';
 
 const DB_NAME = 'emergency-bridge-app';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 
 let dbPromise: Promise<IDBPDatabase> | null = null;
 
@@ -72,6 +72,11 @@ function db(): Promise<IDBPDatabase> {
           d.createObjectStore('drivenc_signs', { keyPath: 'id' });
         if (!d.objectStoreNames.contains('drivenc_workzones'))
           d.createObjectStore('drivenc_workzones', { keyPath: 'id' });
+        // v10: questionnaire template cache (Phase 2) — published form
+        // templates + questions per state for offline field rendering,
+        // keyed by `${for_state}:${version}` (see lib/formSync.ts).
+        if (!d.objectStoreNames.contains('form_templates'))
+          d.createObjectStore('form_templates', { keyPath: 'key' });
       },
     });
   }
